@@ -1,0 +1,12 @@
+.venv/
+env/
+*.pyc
+__pycache__/
+/.idea/
+/.vscode/
+/config.json
+/token.json
+/logs/
+README.md
+desktop.ini
+

@@ -1,0 +1,350 @@
+{
+  "devices": [
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEu6MEBr5Hp-4VB8RJlYdmdPNVfS-K68oRX0Zz3fUHyYG6RNqsCYaCQVYYa3-dG9cI9y3Xo-PXzAv1PzQqwhgSlC",
+      "type": "sdm.devices.types.THERMOSTAT",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEtqXFbnxD6mLnirmxUIFaSGbz49P85AcBTODxx--P2sIyih8b7o5_UXHxRTWe16heB6YDJaEHPwDHuJatS1GM9Z6gUB3SXVHsIhlPd4RTUk8vjuFLLKA5QUMDb00RVLFjVJ6Q4meA",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.Humidity": {
+          "ambientHumidityPercent": 51
+        },
+        "sdm.devices.traits.Connectivity": {
+          "status": "ONLINE"
+        },
+        "sdm.devices.traits.Fan": {
+          "timerMode": "OFF"
+        },
+        "sdm.devices.traits.ThermostatMode": {
+          "mode": "HEAT",
+          "availableModes": [
+            "HEAT",
+            "COOL",
+            "HEATCOOL",
+            "OFF"
+          ]
+        },
+        "sdm.devices.traits.ThermostatEco": {
+          "availableModes": [
+            "OFF",
+            "MANUAL_ECO"
+          ],
+          "mode": "OFF",
+          "heatCelsius": 17.779999,
+          "coolCelsius": 26.22998
+        },
+        "sdm.devices.traits.ThermostatHvac": {
+          "status": "OFF"
+        },
+        "sdm.devices.traits.Settings": {
+          "temperatureScale": "FAHRENHEIT"
+        },
+        "sdm.devices.traits.ThermostatTemperatureSetpoint": {
+          "heatCelsius": 19.302444
+        },
+        "sdm.devices.traits.Temperature": {
+          "ambientTemperatureCelsius": 19.759995
+        }
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEtqXFbnxD6mLnirmxUIFaSGbz49P85AcBTODxx--P2sIyih8b7o5_UXHxRTWe16heB6YDJaEHPwDHuJatS1GM9Z6gUB3SXVHsIhlPd4RTUk8vjuFLLKA5QUMDb00RVLFjVJ6Q4meA",   
+          "displayName": "Riley's room"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEu8QEc0tluFXc_mYnd8pjkGngM_2yPbX6188-UdrgFA9yUMV7uyCoMUapWfPKnL4sEMPxWupbLXtJWjdtLxlP0k",
+      "type": "sdm.devices.types.THERMOSTAT",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEv-px0imz2uNE5-W1Asv2KwKFKi9A_pUjuJ5Lpuq_RNGe6Kbh2YgBwPtAHA53N2dp-CCVQABZ2Gl5OVIGsys_9Jthz3HogvUapQ7xrWxGZmm73eNfJmGXhh1-V9v4SSskiiVv1K5Q",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.Humidity": {
+          "ambientHumidityPercent": 48
+        },
+        "sdm.devices.traits.Connectivity": {
+          "status": "ONLINE"
+        },
+        "sdm.devices.traits.Fan": {
+          "timerMode": "OFF"
+        },
+        "sdm.devices.traits.ThermostatMode": {
+          "mode": "HEAT",
+          "availableModes": [
+            "HEAT",
+            "COOL",
+            "HEATCOOL",
+            "OFF"
+          ]
+        },
+        "sdm.devices.traits.ThermostatEco": {
+          "availableModes": [
+            "OFF",
+            "MANUAL_ECO"
+          ],
+          "mode": "OFF",
+          "heatCelsius": 17.779999,
+          "coolCelsius": 24.880005
+        },
+        "sdm.devices.traits.ThermostatHvac": {
+          "status": "OFF"
+        },
+        "sdm.devices.traits.Settings": {
+          "temperatureScale": "FAHRENHEIT"
+        },
+        "sdm.devices.traits.ThermostatTemperatureSetpoint": {
+          "heatCelsius": 18.965256
+        },
+        "sdm.devices.traits.Temperature": {
+          "ambientTemperatureCelsius": 20.289993
+        }
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEv-px0imz2uNE5-W1Asv2KwKFKi9A_pUjuJ5Lpuq_RNGe6Kbh2YgBwPtAHA53N2dp-CCVQABZ2Gl5OVIGsys_9Jthz3HogvUapQ7xrWxGZmm73eNfJmGXhh1-V9v4SSskiiVv1K5Q",   
+          "displayName": "Master Bedroom"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEsdYHtggbgDnlGE7YB9qBk4lszm6ceUJq15rrbH9wLyrTyhRWEV67GIOLfHxiVOwtKUtOC0DFdRIVhhEwWnoP1C",
+      "type": "sdm.devices.types.THERMOSTAT",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEsR1wSTJsALxjNprEKJf5o5XHS5o5vpOhSOsRa5rdVzB43RIFwgBSkLiv--Q0nz3M_Wq2YdUjxD_pk0Bo-_qGC5As2ALIkoEyzQ9sTAhzSYO4RYmCCFUJmqgguGaluSXyhqRQQmBw",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.Humidity": {
+          "ambientHumidityPercent": 47
+        },
+        "sdm.devices.traits.Connectivity": {
+          "status": "ONLINE"
+        },
+        "sdm.devices.traits.Fan": {
+          "timerMode": "OFF"
+        },
+        "sdm.devices.traits.ThermostatMode": {
+          "mode": "HEAT",
+          "availableModes": [
+            "HEAT",
+            "COOL",
+            "HEATCOOL",
+            "OFF"
+          ]
+        },
+        "sdm.devices.traits.ThermostatEco": {
+          "availableModes": [
+            "OFF",
+            "MANUAL_ECO"
+          ],
+          "mode": "OFF",
+          "heatCelsius": 15.559998,
+          "coolCelsius": 28.649994
+        },
+        "sdm.devices.traits.ThermostatHvac": {
+          "status": "OFF"
+        },
+        "sdm.devices.traits.Settings": {
+          "temperatureScale": "FAHRENHEIT"
+        },
+        "sdm.devices.traits.ThermostatTemperatureSetpoint": {
+          "heatCelsius": 16.88852
+        },
+        "sdm.devices.traits.Temperature": {
+          "ambientTemperatureCelsius": 18.649994
+        }
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEsR1wSTJsALxjNprEKJf5o5XHS5o5vpOhSOsRa5rdVzB43RIFwgBSkLiv--Q0nz3M_Wq2YdUjxD_pk0Bo-_qGC5As2ALIkoEyzQ9sTAhzSYO4RYmCCFUJmqgguGaluSXyhqRQQmBw",   
+          "displayName": "Basement"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEvSl1WCQ3s2xFy4HnP3_LPi6HNSbYkuW2s6iUCwGPV8dXvoV1tv0YJ6SMgPKs03l-MopzGhWCnGPkwKO7I47XA6",
+      "type": "sdm.devices.types.THERMOSTAT",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEvezZR2_3gW7dKUVVdew4p8jLVME3MeXseXROosTl0BZudCc6mnKSYbDdkC2y6lbXNfKDzguA-4HtBANJ4v1qIDDGxPnPds1WSfq4JKsAYparFtSgD_W5H_QZ08tzc6SvxvRMkpLw",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.Humidity": {
+          "ambientHumidityPercent": 50
+        },
+        "sdm.devices.traits.Connectivity": {
+          "status": "ONLINE"
+        },
+        "sdm.devices.traits.Fan": {
+          "timerMode": "OFF"
+        },
+        "sdm.devices.traits.ThermostatMode": {
+          "mode": "HEAT",
+          "availableModes": [
+            "HEAT",
+            "COOL",
+            "HEATCOOL",
+            "OFF"
+          ]
+        },
+        "sdm.devices.traits.ThermostatEco": {
+          "availableModes": [
+            "OFF",
+            "MANUAL_ECO"
+          ],
+          "mode": "OFF",
+          "heatCelsius": 17.779999,
+          "coolCelsius": 26.899994
+        },
+        "sdm.devices.traits.ThermostatHvac": {
+          "status": "OFF"
+        },
+        "sdm.devices.traits.Settings": {
+          "temperatureScale": "FAHRENHEIT"
+        },
+        "sdm.devices.traits.ThermostatTemperatureSetpoint": {
+          "heatCelsius": 16.594452
+        },
+        "sdm.devices.traits.Temperature": {
+          "ambientTemperatureCelsius": 19.299988
+        }
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEvezZR2_3gW7dKUVVdew4p8jLVME3MeXseXROosTl0BZudCc6mnKSYbDdkC2y6lbXNfKDzguA-4HtBANJ4v1qIDDGxPnPds1WSfq4JKsAYparFtSgD_W5H_QZ08tzc6SvxvRMkpLw",   
+          "displayName": "Lego Room"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEu2hURPeLNDe0RIc4x2meiMzdgPOuxrmP5A-dSq2nA5cW75v4Gao0IkPAe5iIuH_d0ze1zxhM2nSSIUuEmdPprH",
+      "type": "sdm.devices.types.THERMOSTAT",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEvM05uErFkSuZo_y9yxDEO3FabbbhIVk-WcQA1g7gUdOMWL55RRZbJcUjrvVdfIHjNniCEarkRdfjzUVVhI-D8PaxtINIYw7mEtEMIRKAD00tJ7mZDgiAhAT76kqzEJiPKrE6FM9g",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.Humidity": {
+          "ambientHumidityPercent": 47
+        },
+        "sdm.devices.traits.Connectivity": {
+          "status": "ONLINE"
+        },
+        "sdm.devices.traits.Fan": {
+          "timerMode": "OFF"
+        },
+        "sdm.devices.traits.ThermostatMode": {
+          "mode": "HEAT",
+          "availableModes": [
+            "HEAT",
+            "COOL",
+            "HEATCOOL",
+            "OFF"
+          ]
+        },
+        "sdm.devices.traits.ThermostatEco": {
+          "availableModes": [
+            "OFF",
+            "MANUAL_ECO"
+          ],
+          "mode": "OFF",
+          "heatCelsius": 17.779999,
+          "coolCelsius": 25.020004
+        },
+        "sdm.devices.traits.ThermostatHvac": {
+          "status": "OFF"
+        },
+        "sdm.devices.traits.Settings": {
+          "temperatureScale": "FAHRENHEIT"
+        },
+        "sdm.devices.traits.ThermostatTemperatureSetpoint": {
+          "heatCelsius": 21.310333
+        },
+        "sdm.devices.traits.Temperature": {
+          "ambientTemperatureCelsius": 21.309998
+        }
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEvM05uErFkSuZo_y9yxDEO3FabbbhIVk-WcQA1g7gUdOMWL55RRZbJcUjrvVdfIHjNniCEarkRdfjzUVVhI-D8PaxtINIYw7mEtEMIRKAD00tJ7mZDgiAhAT76kqzEJiPKrE6FM9g",   
+          "displayName": "Family Room"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEuoyDA2IGz6nTxr9-shfzI64-D_NfAYvmKtDPddIgYhzAsvG2RcAWuh7cP5h9Z2mxTmGggUQ_CgTql4fKsAoSsl",
+      "type": "sdm.devices.types.CAMERA",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEuitXa5r9dLMp6N0CF6fG5w8DkeunyYNt0BpGkSk-k9XkA_0ylXTAW6IqODB8-3VZdwD8M0YF0-weP7gk7di7mWYaXH9sCE0RzC0BbtvCR6WJvF-31_kWEmYd90gZVHp0_nffhBPw",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": "Back yard camera"
+        },
+        "sdm.devices.traits.CameraLiveStream": {
+          "videoCodecs": [
+            "H264"
+          ],
+          "audioCodecs": [
+            "OPUS"
+          ],
+          "supportedProtocols": [
+            "WEB_RTC"
+          ]
+        },
+        "sdm.devices.traits.CameraPerson": {},
+        "sdm.devices.traits.CameraMotion": {}
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEuitXa5r9dLMp6N0CF6fG5w8DkeunyYNt0BpGkSk-k9XkA_0ylXTAW6IqODB8-3VZdwD8M0YF0-weP7gk7di7mWYaXH9sCE0RzC0BbtvCR6WJvF-31_kWEmYd90gZVHp0_nffhBPw",   
+          "displayName": "Back yard"
+        }
+      ]
+    },
+    {
+      "name": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/devices/AVPHwEuCqhRPiGLxGlZZ8uIeMbHHX2bMWjaBsHBKwMeyGcObsETSI8kzZxQqaffIOkNw6X8pv7EdEqA26igNXic5Hlgm",
+      "type": "sdm.devices.types.DOORBELL",
+      "assignee": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEsvOFrz1_uw5BGH2PZFNbJPHalRrl1Zl-a-hBvqnjegTvxje6qv81fx-77N1ZxpKsAT6quIsHoDgf61KANBJh8231_2gJPo1zBnYIWxwU-2zTwGnPSR8fswfR9ZITXoyqqNL9rKKw",     
+      "traits": {
+        "sdm.devices.traits.Info": {
+          "customName": ""
+        },
+        "sdm.devices.traits.CameraLiveStream": {
+          "maxVideoResolution": {
+            "width": 640,
+            "height": 480
+          },
+          "videoCodecs": [
+            "H264"
+          ],
+          "audioCodecs": [
+            "AAC"
+          ],
+          "supportedProtocols": [
+            "RTSP"
+          ]
+        },
+        "sdm.devices.traits.CameraImage": {
+          "maxImageResolution": {
+            "width": 1920,
+            "height": 1200
+          }
+        },
+        "sdm.devices.traits.CameraPerson": {},
+        "sdm.devices.traits.CameraSound": {},
+        "sdm.devices.traits.CameraMotion": {},
+        "sdm.devices.traits.CameraEventImage": {},
+        "sdm.devices.traits.DoorbellChime": {}
+      },
+      "parentRelations": [
+        {
+          "parent": "enterprises/073eee55-f1e7-4c6e-ad6d-56525b2dadc4/structures/AVPHwEs_RG1t5XnJkQKbnZjgIXcCm8UtNCqOw-nWCSqgKEBUSLGQ0DXIRpjeX3IQSBVfiYXYhnqb3Fjas8xFoQPF04rC/rooms/AVPHwEsvOFrz1_uw5BGH2PZFNbJPHalRrl1Zl-a-hBvqnjegTvxje6qv81fx-77N1ZxpKsAT6quIsHoDgf61KANBJh8231_2gJPo1zBnYIWxwU-2zTwGnPSR8fswfR9ZITXoyqqNL9rKKw",   
+          "displayName": "Front Door"
+        }
+      ]
+    }
+  ]
+}
