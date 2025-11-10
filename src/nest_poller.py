@@ -212,6 +212,46 @@ def write_rows(rows: Dict[str, Dict[str, Any]], config: Config) -> None:
                 writer.writeheader()
             writer.writerow(row)
         logging.info("Logged data for %s to %s", device_slug, file_path)
+        prune_old_entries(file_path, retention_days=730)
+
+
+def prune_old_entries(file_path: pathlib.Path, retention_days: int) -> None:
+    if retention_days <= 0 or not file_path.exists():
+        return
+
+    cutoff = dt.date.today() - dt.timedelta(days=retention_days)
+
+    with file_path.open("r", newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        rows = list(reader)
+
+    if not rows:
+        return
+
+    filtered = []
+    for row in rows:
+        try:
+            row_date = dt.datetime.strptime(row.get("Date", ""), "%Y-%m-%d").date()
+        except ValueError:
+            filtered.append(row)
+            continue
+
+        if row_date >= cutoff:
+            filtered.append(row)
+
+    if len(filtered) == len(rows):
+        return
+
+    with file_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(filtered)
+    logging.info(
+        "Pruned %d rows older than %s from %s",
+        len(rows) - len(filtered),
+        cutoff.isoformat(),
+        file_path,
+    )
 
 
 def parse_args() -> argparse.Namespace:
