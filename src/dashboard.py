@@ -36,6 +36,18 @@ def load_log(filename: str) -> pd.DataFrame:
     df = df.dropna(subset=["timestamp"])
     df = df.sort_values("timestamp")
     df = df.set_index("timestamp")
+
+    numeric_columns = [
+        "Temperature at Thermostat or Sensor",
+        "Heat Setpoint",
+        "Cool Setpoint",
+        "Outdoor Temperature",
+        "Humidity",
+    ]
+    for column in numeric_columns:
+        if column in df:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
     return df
 
 
@@ -83,6 +95,17 @@ def build_chart(df: pd.DataFrame) -> go.Figure:
                 mode="lines",
                 name="Cool Setpoint",
                 line=dict(color="#2ca02c", dash="dash"),
+            )
+        )
+
+    if "Outdoor Temperature" in df:
+        figure.add_trace(
+            go.Scatter(
+                x=df.index,
+                y=df["Outdoor Temperature"],
+                mode="lines",
+                name="Outdoor Temperature",
+                line=dict(color="#ff7f0e"),
             )
         )
 

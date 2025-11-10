@@ -20,6 +20,6 @@ exit /b 1
 
 :activate
 call "%VENV_DIR%\Scripts\activate.bat"
-streamlit run src\dashboard.py
+streamlit run src\dashboard.py --browser.gatherUsageStats=false --server.headless=true
 ENDLOCAL
 

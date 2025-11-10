@@ -7,6 +7,7 @@ import json
 import logging
 import pathlib
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, Iterable, Optional
 from zoneinfo import ZoneInfo
 
@@ -16,10 +17,19 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 DEVICES_URL_TEMPLATE = (
     "https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/devices"
 )
+NWS_POINTS_URL = "https://api.weather.gov/points/{lat},{lon}"
+NWS_TIMEOUT = 12
 
 
 class NestPollerError(RuntimeError):
     """Raised when the poller encounters a recoverable error."""
+
+
+@dataclass
+class WeatherConfig:
+    latitude: float
+    longitude: float
+    user_agent: str
 
 
 @dataclass
@@ -31,6 +41,7 @@ class Config:
     output_dir: pathlib.Path
     temperature_scale: str = "fahrenheit"
     timezone: ZoneInfo = ZoneInfo("America/New_York")
+    weather: Optional[WeatherConfig] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: pathlib.Path) -> "Config":
@@ -52,6 +63,28 @@ class Config:
         except Exception as exc:  # pragma: no cover - invalid tz config
             raise NestPollerError(f"Invalid timezone in config: {timezone_name}") from exc
 
+        weather_cfg = None
+        if "weather" in data and data["weather"] is not None:
+            weather_data = data["weather"]
+            missing_weather = [
+                key for key in ("latitude", "longitude", "user_agent") if key not in weather_data
+            ]
+            if missing_weather:
+                raise NestPollerError(
+                    f"Weather config missing required fields: {', '.join(missing_weather)}"
+                )
+            try:
+                latitude = float(weather_data["latitude"])
+                longitude = float(weather_data["longitude"])
+            except (TypeError, ValueError) as exc:
+                raise NestPollerError("Weather latitude/longitude must be numeric.") from exc
+
+            weather_cfg = WeatherConfig(
+                latitude=latitude,
+                longitude=longitude,
+                user_agent=str(weather_data["user_agent"]),
+            )
+
         return cls(
             project_id=data["project_id"],
             client_id=data["client_id"],
@@ -60,6 +93,7 @@ class Config:
             output_dir=output_dir,
             temperature_scale=temperature_scale,
             timezone=timezone,
+            weather=weather_cfg,
         )
 
 
@@ -108,12 +142,98 @@ def fetch_devices(config: Config, access_token: str) -> Iterable[Dict[str, Any]]
     return devices
 
 
-def to_temperature(value_celsius: Optional[float], scale: str) -> Optional[float]:
+def fetch_outdoor_temperature(config: Config) -> Optional[float]:
+    if not config.weather:
+        return None
+
+    station_url = _resolve_station(
+        config.weather.latitude, config.weather.longitude, config.weather.user_agent
+    )
+    if not station_url:
+        return None
+
+    headers = {
+        "User-Agent": config.weather.user_agent,
+        "Accept": "application/geo+json",
+    }
+    try:
+        response = requests.get(
+            f"{station_url}/observations/latest", headers=headers, timeout=NWS_TIMEOUT
+        )
+        if response.status_code != 200:
+            logging.warning(
+                "Weather.gov latest observation failed (%s): %s",
+                response.status_code,
+                response.text[:200],
+            )
+            return None
+        payload = response.json()
+    except requests.RequestException as exc:
+        logging.warning("Failed to fetch outdoor temperature: %s", exc)
+        return None
+
+    temp_c = (
+        payload.get("properties", {})
+        .get("temperature", {})
+        .get("value")
+    )
+    if temp_c is None:
+        return None
+    return round((temp_c * 9 / 5) + 32, 1)
+
+
+@lru_cache(maxsize=8)
+def _resolve_station(latitude: float, longitude: float, user_agent: str) -> Optional[str]:
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "application/geo+json",
+    }
+    try:
+        point_resp = requests.get(
+            NWS_POINTS_URL.format(lat=latitude, lon=longitude),
+            headers=headers,
+            timeout=NWS_TIMEOUT,
+        )
+        if point_resp.status_code != 200:
+            logging.warning(
+                "Weather.gov points lookup failed (%s): %s",
+                point_resp.status_code,
+                point_resp.text[:200],
+            )
+            return None
+        point_payload = point_resp.json()
+        stations_url = point_payload.get("properties", {}).get("observationStations")
+        if not stations_url:
+            logging.warning("Weather.gov response missing observationStations URL.")
+            return None
+
+        stations_resp = requests.get(stations_url, headers=headers, timeout=NWS_TIMEOUT)
+        if stations_resp.status_code != 200:
+            logging.warning(
+                "Weather.gov stations lookup failed (%s): %s",
+                stations_resp.status_code,
+                stations_resp.text[:200],
+            )
+            return None
+        stations_payload = stations_resp.json()
+        features = stations_payload.get("features", [])
+        if not features:
+            logging.warning("Weather.gov returned no observation stations for coordinates.")
+            return None
+        station_url = features[0].get("id")
+        return station_url
+    except requests.RequestException as exc:
+        logging.warning("Failed to resolve weather station: %s", exc)
+        return None
+
+
+def to_temperature(value_celsius: Optional[float], scale: str, *, round_value: bool = True) -> Optional[float]:
     if value_celsius is None:
         return None
     if scale == "celsius":
-        return round(value_celsius)
-    return round((value_celsius * 9 / 5) + 32)
+        return round(value_celsius) if round_value else value_celsius
+    converted = (value_celsius * 9 / 5) + 32
+    return round(converted) if round_value else converted
 
 
 def sanitize_name(name: str) -> str:
@@ -127,6 +247,7 @@ def extract_thermostat_rows(devices: Iterable[Dict[str, Any]], config: Config) -
     local_time = dt.datetime.now(dt.timezone.utc).astimezone(config.timezone)
     date_str = local_time.date().isoformat()
     time_str = local_time.strftime("%H:%M")
+    outdoor_temp_f = fetch_outdoor_temperature(config)
 
     for device in devices:
         device_type = device.get("type", "")
@@ -152,7 +273,7 @@ def extract_thermostat_rows(devices: Iterable[Dict[str, Any]], config: Config) -
             "Date": date_str,
             "Time (ET)": time_str,
             "Temperature at Thermostat or Sensor": to_temperature(
-                ambient_c, config.temperature_scale
+                ambient_c, config.temperature_scale, round_value=False
             ),
             "Humidity": humidity,
             "Heat Setpoint": to_temperature(
@@ -166,6 +287,7 @@ def extract_thermostat_rows(devices: Iterable[Dict[str, Any]], config: Config) -
             if "coolCelsius" in setpoints
             else None,
             "HVAC Status": hvac_status,
+            "Outdoor Temperature": outdoor_temp_f,
         }
 
         rows[sanitize_name(readable_name)] = row
@@ -200,6 +322,7 @@ def write_rows(rows: Dict[str, Dict[str, Any]], config: Config) -> None:
         "Heat Setpoint",
         "Cool Setpoint",
         "HVAC Status",
+        "Outdoor Temperature",
     ]
 
     for device_slug, row in rows.items():
@@ -212,10 +335,10 @@ def write_rows(rows: Dict[str, Dict[str, Any]], config: Config) -> None:
                 writer.writeheader()
             writer.writerow(row)
         logging.info("Logged data for %s to %s", device_slug, file_path)
-        prune_old_entries(file_path, retention_days=730)
+        prune_old_entries(file_path, retention_days=730, header=header)
 
 
-def prune_old_entries(file_path: pathlib.Path, retention_days: int) -> None:
+def prune_old_entries(file_path: pathlib.Path, retention_days: int, header: Iterable[str]) -> None:
     if retention_days <= 0 or not file_path.exists():
         return
 
@@ -230,20 +353,26 @@ def prune_old_entries(file_path: pathlib.Path, retention_days: int) -> None:
 
     filtered = []
     for row in rows:
+        # migrate legacy column names or missing fields
+        if "Het Stpoint" in row and "Heat Setpoint" not in row:
+            row["Heat Setpoint"] = row.pop("Het Stpoint")
+
         try:
             row_date = dt.datetime.strptime(row.get("Date", ""), "%Y-%m-%d").date()
         except ValueError:
-            filtered.append(row)
+            normalized_row = {key: row.get(key, "") for key in header}
+            filtered.append(normalized_row)
             continue
 
         if row_date >= cutoff:
-            filtered.append(row)
+            normalized_row = {key: row.get(key, "") for key in header}
+            filtered.append(normalized_row)
 
     if len(filtered) == len(rows):
         return
 
     with file_path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
+        writer = csv.DictWriter(fh, fieldnames=list(header))
         writer.writeheader()
         writer.writerows(filtered)
     logging.info(
