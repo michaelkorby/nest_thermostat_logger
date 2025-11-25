@@ -160,7 +160,7 @@ Click **OK**, supply your account password if prompted, and verify the task appe
 **This is set up on the basement computer**
 
 ## Dashboard
-Streamlit dashboard is set up via nssm on the basement computer. The name of the service is Nest Dashboard. It calls start_dashboard.bat.
+Streamlit dashboard is set up via nssm on the basement computer. The name of the service is "NestDashboard". It calls start_dashboard.bat.
 
 ## Troubleshooting
 

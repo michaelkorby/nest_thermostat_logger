@@ -112,12 +112,14 @@ def build_chart(df: pd.DataFrame) -> go.Figure:
     hvac = hvac_indicator(df)
     if not hvac.empty:
         figure.add_trace(
-            go.Bar(
+            go.Scatter(
                 x=df.index,
                 y=hvac,
                 name="HVAC On",
+                mode="lines",
+                line=dict(shape="hv", color="#9467bd", width=0),
+                fill="tozeroy",
                 opacity=0.2,
-                marker=dict(color="#9467bd"),
                 yaxis="y2",
             )
         )
