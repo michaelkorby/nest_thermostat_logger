@@ -5,17 +5,25 @@ SETLOCAL
 set SCRIPT_DIR=%~dp0
 cd /d "%SCRIPT_DIR%"
 
-set VENV_DIR=.venv_%COMPUTERNAME%
+REM Check for venv in C:\venvs\ (new location)
+set VENV_DIR=C:\venvs\nest_thermostat_logger_%COMPUTERNAME%
 if exist "%VENV_DIR%\Scripts\activate.bat" goto :activate
 
-set VENV_DIR=.venv
+REM Fall back to old locations in project directory (for migration period)
+set VENV_DIR=%SCRIPT_DIR%.venv_%COMPUTERNAME%
+if exist "%VENV_DIR%\Scripts\activate.bat" goto :activate
+
+set VENV_DIR=%SCRIPT_DIR%.venv
 if exist "%VENV_DIR%\Scripts\activate.bat" goto :activate
 
 echo Virtual environment not found.
 echo Expected one of:
+echo   C:\venvs\nest_thermostat_logger_%COMPUTERNAME%
 echo   %SCRIPT_DIR%\.venv_%COMPUTERNAME%
 echo   %SCRIPT_DIR%\.venv
-echo Please create it with: py -3.12 -m venv %VENV_DIR%
+echo.
+echo To create a new venv in the standard location:
+echo   py -3.12 -m venv C:\venvs\nest_thermostat_logger_%COMPUTERNAME%
 exit /b 1
 
 :activate

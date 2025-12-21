@@ -61,13 +61,15 @@ With these steps complete you have everything required for unattended access to 
 
 ## Setup
 
-1. Create a machine-specific virtual environment and install dependencies. Update the -3.13 version to -3.12 if that's what we have (e.g. on the laptop):
+1. Create a machine-specific virtual environment on the C: drive (outside of Google Drive) and install dependencies:
 
 ```bash
-py -3.13 -m venv .venv_%COMPUTERNAME%
-.\.venv_%COMPUTERNAME%\Scripts\Activate
+py -3.12 -m venv C:\venvs\nest_thermostat_logger_%COMPUTERNAME%
+C:\venvs\nest_thermostat_logger_%COMPUTERNAME%\Scripts\Activate
 pip install -r requirements.txt
 ```
+
+   > **Note:** Virtual environments are stored in `C:\venvs\` to avoid syncing large files through Google Drive. If you have an existing `.venv*` directory in the project folder, use `migrate_venv.bat` to move it to the new location.
 
 2. Copy `config.sample.json` to `config.json` and update the values:
 
@@ -121,10 +123,10 @@ pip install -r requirements.txt
 
     > The repository includes `.streamlit/credentials.toml` with an empty email so Streamlit can start headlessly (useful for services). The helper script `start_dashboard.bat` automatically points `STREAMLIT_CONFIG_DIR` to that folder and disables usage-stat prompts.
 
-The helper script `start_dashboard.bat` and the examples below automatically look for `.venv_%COMPUTERNAME%` first and fall back to `.venv`. When configuring Task Scheduler on each computer, point to the matching `python.exe`:
+The helper script `start_dashboard.bat` automatically looks for the virtual environment in `C:\venvs\nest_thermostat_logger_%COMPUTERNAME%` (with fallback to old project-directory locations for migration). When configuring Task Scheduler on each computer, point to the matching `python.exe`:
 
 ```
-Program/script: C:\Users\<you>\...\nest_thermostat_logger\.venv_%COMPUTERNAME%\Scripts\python.exe
+Program/script: C:\venvs\nest_thermostat_logger_%COMPUTERNAME%\Scripts\python.exe
 ```
 
 ## Scheduling
@@ -144,7 +146,7 @@ To collect data continuously, schedule the poller with Windows Task Scheduler (o
 4. On the **Actions** tab → **New…**, configure the poller via your virtual environment, for example:
 
    ```
-   Program/script: C:\Users\mkorb\My Drive\Code\nest_thermostat_logger\.venv\Scripts\python.exe
+   Program/script: C:\venvs\nest_thermostat_logger_%COMPUTERNAME%\Scripts\python.exe
    Add arguments: -m src.nest_poller --config config.json --log-file logs\poller.log
    Start in: C:\Users\mkorb\My Drive\Code\nest_thermostat_logger
    ```
@@ -164,6 +166,11 @@ Streamlit dashboard is set up via nssm on the basement computer. The name of the
 
 ## Troubleshooting
 
+- **Refresh token expires after ~7 days**: If you see `invalid_grant` errors after about a week, this is common with unverified OAuth apps in Testing mode. The poller will log clear instructions when this happens. To prevent this long-term:
+  - **Option 1 (Recommended)**: Get your OAuth app verified in Google Cloud Console. This requires submitting your app for review, but refresh tokens will last much longer (up to 6 months of inactivity).
+  - **Option 2**: Keep the app in Testing mode but ensure it runs frequently (your 5-minute schedule should help). You may still need to re-authorize periodically.
+  - When Google provides a new refresh token during token refresh, the poller logs it—update `config.json` with the new value to extend the token lifetime.
+  
 - If the script logs `Failed to refresh access token`, verify the client credentials and refresh token.
 - `No thermostat devices found` indicates the SDM API returned no thermostat devices. Check the project linkage and API permissions.
 - Use `--log-level DEBUG` for detailed logging:

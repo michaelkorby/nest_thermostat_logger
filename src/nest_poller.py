@@ -109,7 +109,14 @@ def load_config(path: pathlib.Path) -> Config:
     return Config.from_dict(raw, base_dir=path.parent)
 
 
-def refresh_access_token(config: Config) -> str:
+def refresh_access_token(config: Config) -> tuple[str, Optional[str]]:
+    """
+    Refresh the access token using the refresh token.
+    
+    Returns:
+        Tuple of (access_token, new_refresh_token). new_refresh_token is None
+        if Google didn't provide a new one.
+    """
     payload = {
         "client_id": config.client_id,
         "client_secret": config.client_secret,
@@ -118,14 +125,30 @@ def refresh_access_token(config: Config) -> str:
     }
     response = requests.post(TOKEN_URL, data=payload, timeout=15)
     if response.status_code != 200:
+        error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+        error_type = error_data.get("error", "unknown_error")
+        error_desc = error_data.get("error_description", response.text)
+        
+        if error_type == "invalid_grant":
+            raise NestPollerError(
+                f"Refresh token expired or revoked. This typically happens after ~7 days with "
+                f"unverified OAuth apps. You need to re-authorize:\n"
+                f"1. Visit the PCM authorization URL from private_notes.md\n"
+                f"2. Exchange the new authorization code for tokens\n"
+                f"3. Update the refresh_token in config.json\n"
+                f"Original error: {error_desc}"
+            )
         raise NestPollerError(
-            f"Failed to refresh access token: {response.status_code} {response.text}"
+            f"Failed to refresh access token: {response.status_code} {error_desc}"
         )
     token_data = response.json()
     access_token = token_data.get("access_token")
     if not access_token:
         raise NestPollerError("Missing access_token in refresh response")
-    return access_token
+    
+    # Google sometimes returns a new refresh_token; capture it if provided
+    new_refresh_token = token_data.get("refresh_token")
+    return access_token, new_refresh_token
 
 
 def fetch_devices(config: Config, access_token: str) -> Iterable[Dict[str, Any]]:
@@ -421,7 +444,15 @@ def main() -> None:
 
     try:
         config = load_config(args.config)
-        access_token = refresh_access_token(config)
+        access_token, new_refresh_token = refresh_access_token(config)
+        
+        # If Google provided a new refresh token, log it (user can update config manually)
+        if new_refresh_token:
+            logging.info(
+                "Google provided a new refresh token. Update config.json with:\n"
+                f'  "refresh_token": "{new_refresh_token}"'
+            )
+        
         devices = fetch_devices(config, access_token)
         rows = extract_thermostat_rows(devices, config)
 
