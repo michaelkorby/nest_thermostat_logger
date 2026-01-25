@@ -13,6 +13,12 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from src.oauth_reauth import (
+    ReauthorizationInProgressError,
+    perform_reauthorization,
+    update_config_refresh_token,
+)
+
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 DEVICES_URL_TEMPLATE = (
     "https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/devices"
@@ -23,6 +29,10 @@ NWS_TIMEOUT = 12
 
 class NestPollerError(RuntimeError):
     """Raised when the poller encounters a recoverable error."""
+
+
+class RefreshTokenExpiredError(NestPollerError):
+    """Raised when the refresh token has expired and re-authorization is needed."""
 
 
 @dataclass
@@ -130,13 +140,8 @@ def refresh_access_token(config: Config) -> tuple[str, Optional[str]]:
         error_desc = error_data.get("error_description", response.text)
         
         if error_type == "invalid_grant":
-            raise NestPollerError(
-                f"Refresh token expired or revoked. This typically happens after ~7 days with "
-                f"unverified OAuth apps. You need to re-authorize:\n"
-                f"1. Visit the PCM authorization URL from private_notes.md\n"
-                f"2. Exchange the new authorization code for tokens\n"
-                f"3. Update the refresh_token in config.json\n"
-                f"Original error: {error_desc}"
+            raise RefreshTokenExpiredError(
+                f"Refresh token expired or revoked: {error_desc}"
             )
         raise NestPollerError(
             f"Failed to refresh access token: {response.status_code} {error_desc}"
@@ -426,6 +431,11 @@ def parse_args() -> argparse.Namespace:
         type=pathlib.Path,
         help="Optional path to a log file. When set, the file is overwritten each run.",
     )
+    parser.add_argument(
+        "--reauth",
+        action="store_true",
+        help="Force re-authorization even if current refresh token is valid.",
+    )
     return parser.parse_args()
 
 
@@ -444,15 +454,36 @@ def main() -> None:
 
     try:
         config = load_config(args.config)
-        access_token, new_refresh_token = refresh_access_token(config)
-        
-        # If Google provided a new refresh token, log it (user can update config manually)
-        if new_refresh_token:
-            logging.info(
-                "Google provided a new refresh token. Update config.json with:\n"
-                f'  "refresh_token": "{new_refresh_token}"'
+
+        # Handle --reauth flag or expired refresh token
+        if args.reauth:
+            logging.info("Forcing re-authorization as requested...")
+            access_token, new_refresh_token = perform_reauthorization(
+                config_path=args.config,
+                project_id=config.project_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
             )
-        
+            config = load_config(args.config)
+        else:
+            try:
+                access_token, new_refresh_token = refresh_access_token(config)
+            except RefreshTokenExpiredError as exc:
+                logging.warning("Refresh token expired: %s", exc)
+                logging.info("Starting automatic re-authorization...")
+                access_token, new_refresh_token = perform_reauthorization(
+                    config_path=args.config,
+                    project_id=config.project_id,
+                    client_id=config.client_id,
+                    client_secret=config.client_secret,
+                )
+                config = load_config(args.config)
+
+        # If Google provided a new refresh token during normal refresh, save it
+        if new_refresh_token and not args.reauth:
+            update_config_refresh_token(args.config, new_refresh_token)
+            logging.info("Updated config.json with new refresh token from Google")
+
         devices = fetch_devices(config, access_token)
         rows = extract_thermostat_rows(devices, config)
 
@@ -461,6 +492,8 @@ def main() -> None:
             return
 
         write_rows(rows, config)
+    except ReauthorizationInProgressError as exc:
+        logging.warning("%s", exc)
     except NestPollerError as exc:
         logging.error("Poller error: %s", exc)
     except requests.RequestException as exc:

@@ -21,7 +21,10 @@ This project polls the Google Nest Smart Device Management (SDM) API for thermos
    - Open the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) and make sure the Device Access project is selected (the same project ID shown in the Device Access Console).
    - If prompted to configure the OAuth consent screen, choose **External**, complete the required fields, and add your Google account to the list of test users. Save the consent screen.
    - Click **Create Credentials → OAuth client ID**. Select **Web application** for the application type.
-   - Under **Authorized redirect URIs**, add `https://www.google.com` (the same value used later in the PCM authorization URL), then click **Create**.
+   - Under **Authorized redirect URIs**, add both:
+     - `https://www.google.com` (used for initial manual authorization)
+     - `http://localhost:8085` (used for automatic re-authorization)
+   - Click **Create**.
    - The dialog displays your new **client ID** and **client secret**; download the JSON or copy the values. These are the credentials you will paste into `config.json` and use in the PCM authorization URL.
 
    **These values are stored under API Keys in LastPass**
@@ -164,12 +167,34 @@ Click **OK**, supply your account password if prompted, and verify the task appe
 ## Dashboard
 Streamlit dashboard is set up via nssm on the basement computer. The name of the service is "NestDashboard". It calls start_dashboard.bat.
 
+## Automatic Re-authorization
+
+When the refresh token expires (typically after ~7 days for unverified OAuth apps), the poller automatically handles re-authorization:
+
+1. A browser tab opens to the Google/Nest authorization page
+2. The poller waits up to **7 days** for you to complete authorization (you don't need to be logged in immediately)
+3. When you log in and click "Allow", the poller captures the code and exchanges it for new tokens
+4. The new refresh token is saved to `config.json` automatically
+5. Polling resumes on the next scheduled run
+
+During this waiting period, subsequent poller runs will detect that re-authorization is already in progress and skip gracefully (no duplicate browser tabs).
+
+**Requirements**: Ensure `http://localhost:8085` is listed in your OAuth client's Authorized Redirect URIs in Google Cloud Console (see step 2 in Prerequisites).
+
+To force re-authorization manually (e.g., to test the flow):
+
+```bash
+python -m src.nest_poller --config config.json --reauth
+```
+
 ## Troubleshooting
 
-- **Refresh token expires after ~7 days**: If you see `invalid_grant` errors after about a week, this is common with unverified OAuth apps in Testing mode. The poller will log clear instructions when this happens. To prevent this long-term:
+- **Refresh token expires after ~7 days**: This is common with unverified OAuth apps in Testing mode. The poller now handles this automatically by opening a browser for re-authorization. If you want to prevent this:
   - **Option 1 (Recommended)**: Get your OAuth app verified in Google Cloud Console. This requires submitting your app for review, but refresh tokens will last much longer (up to 6 months of inactivity).
-  - **Option 2**: Keep the app in Testing mode but ensure it runs frequently (your 5-minute schedule should help). You may still need to re-authorize periodically.
-  - When Google provides a new refresh token during token refresh, the poller logs it—update `config.json` with the new value to extend the token lifetime.
+  - **Option 2**: Keep the app in Testing mode but ensure it runs frequently (your 5-minute schedule should help).
+  - When Google provides a new refresh token during normal token refresh, the poller automatically saves it to `config.json`.
+
+- **Browser doesn't open for re-authorization**: If running headless (no user session), the browser cannot open. Run the poller manually with `--reauth` in an interactive session to complete re-authorization.
   
 - If the script logs `Failed to refresh access token`, verify the client credentials and refresh token.
 - `No thermostat devices found` indicates the SDM API returned no thermostat devices. Check the project linkage and API permissions.
