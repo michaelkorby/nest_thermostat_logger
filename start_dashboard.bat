@@ -27,7 +27,7 @@ echo   py -3.12 -m venv C:\venvs\nest_thermostat_logger_%COMPUTERNAME%
 exit /b 1
 
 :activate
-call "%VENV_DIR%\Scripts\activate.bat"
-streamlit run src\dashboard.py --browser.gatherUsageStats=false --server.headless=true
+REM Use venv's python directly to avoid system Python picking up the command
+"%VENV_DIR%\Scripts\python.exe" -m streamlit run src\dashboard.py --browser.gatherUsageStats=false --server.headless=true
 ENDLOCAL
 
