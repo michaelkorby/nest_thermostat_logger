@@ -14,10 +14,14 @@ import http.server
 import json
 import logging
 import pathlib
+import smtplib
+import socket
 import tempfile
 import threading
 import urllib.parse
 import webbrowser
+from dataclasses import dataclass
+from email.mime.text import MIMEText
 from typing import Optional
 
 import requests
@@ -39,6 +43,71 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 # Default timeout: 7 days (user may take days to log in and complete OAuth)
 DEFAULT_REAUTH_TIMEOUT_SECONDS = 7 * 24 * 60 * 60  # 604800 seconds
+
+
+@dataclass
+class EmailConfig:
+    """Configuration for email notifications."""
+    recipient: str
+    smtp_server: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    sender_email: str = ""
+    sender_password: str = ""  # Gmail App Password
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "EmailConfig":
+        return cls(
+            recipient=data["recipient"],
+            smtp_server=data.get("smtp_server", "smtp.gmail.com"),
+            smtp_port=data.get("smtp_port", 587),
+            sender_email=data.get("sender_email", data["recipient"]),
+            sender_password=data.get("sender_password", ""),
+        )
+
+
+def send_reauth_notification_email(email_config: EmailConfig) -> bool:
+    """
+    Send an email notification that OAuth reauthorization is needed.
+
+    Args:
+        email_config: Email configuration with SMTP settings.
+
+    Returns:
+        True if email sent successfully, False otherwise.
+    """
+    if not email_config.sender_password:
+        logging.warning("Email notification skipped: no sender_password configured")
+        return False
+
+    hostname = socket.gethostname()
+    subject = f"Nest Thermostat Logger - OAuth Reauthorization Needed ({hostname})"
+    body = f"""The Nest Thermostat Logger on {hostname} needs you to complete OAuth reauthorization.
+
+A browser window should have opened on the machine. If you have remote access, please complete the authorization flow.
+
+If you're not at the machine, the poller will continue waiting (up to 7 days) for you to authorize.
+
+This is an automated message from the Nest Thermostat Logger.
+"""
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = email_config.sender_email
+    msg["To"] = email_config.recipient
+
+    try:
+        with smtplib.SMTP(email_config.smtp_server, email_config.smtp_port, timeout=30) as server:
+            server.starttls()
+            server.login(email_config.sender_email, email_config.sender_password)
+            server.sendmail(email_config.sender_email, email_config.recipient, msg.as_string())
+        logging.info("Sent reauthorization notification email to %s", email_config.recipient)
+        return True
+    except smtplib.SMTPAuthenticationError as e:
+        logging.error("Email authentication failed. Check sender_password (use Gmail App Password): %s", e)
+        return False
+    except Exception as e:
+        logging.error("Failed to send notification email: %s", e)
+        return False
 
 def _acquire_reauth_lock() -> bool:
     """Try to acquire the re-authorization lock.
@@ -278,14 +347,16 @@ def perform_reauthorization(
     client_id: str,
     client_secret: str,
     timeout_seconds: int = DEFAULT_REAUTH_TIMEOUT_SECONDS,
+    email_config: Optional[EmailConfig] = None,
 ) -> tuple[str, str]:
     """Perform full OAuth re-authorization flow.
 
     This function:
     1. Opens the browser to the PCM authorization URL
-    2. Starts a local server to capture the callback (waits up to 7 days by default)
-    3. Exchanges the authorization code for tokens
-    4. Updates config.json with the new refresh token
+    2. Sends email notification (if configured)
+    3. Starts a local server to capture the callback (waits up to 7 days by default)
+    4. Exchanges the authorization code for tokens
+    5. Updates config.json with the new refresh token
 
     Args:
         config_path: Path to config.json file.
@@ -293,6 +364,7 @@ def perform_reauthorization(
         client_id: OAuth client ID.
         client_secret: OAuth client secret.
         timeout_seconds: Maximum time to wait for user authorization (default: 7 days).
+        email_config: Optional email configuration for notifications.
 
     Returns:
         Tuple of (access_token, refresh_token).
@@ -325,6 +397,10 @@ def perform_reauthorization(
         if not webbrowser.open(auth_url):
             logging.warning("Could not open browser automatically.")
             logging.info("Please open this URL manually:\n%s", auth_url)
+
+        # Send email notification if configured
+        if email_config:
+            send_reauth_notification_email(email_config)
 
         # Wait for callback
         auth_code = wait_for_authorization_code(timeout_seconds)

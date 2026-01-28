@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from src.oauth_reauth import (
+    EmailConfig,
     ReauthorizationInProgressError,
     perform_reauthorization,
     update_config_refresh_token,
@@ -52,6 +53,7 @@ class Config:
     temperature_scale: str = "fahrenheit"
     timezone: ZoneInfo = ZoneInfo("America/New_York")
     weather: Optional[WeatherConfig] = None
+    email: Optional[EmailConfig] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: pathlib.Path) -> "Config":
@@ -95,6 +97,13 @@ class Config:
                 user_agent=str(weather_data["user_agent"]),
             )
 
+        email_cfg = None
+        if "email" in data and data["email"] is not None:
+            email_data = data["email"]
+            if "recipient" not in email_data:
+                raise NestPollerError("Email config missing required field: recipient")
+            email_cfg = EmailConfig.from_dict(email_data)
+
         return cls(
             project_id=data["project_id"],
             client_id=data["client_id"],
@@ -104,6 +113,7 @@ class Config:
             temperature_scale=temperature_scale,
             timezone=timezone,
             weather=weather_cfg,
+            email=email_cfg,
         )
 
 
@@ -463,6 +473,7 @@ def main() -> None:
                 project_id=config.project_id,
                 client_id=config.client_id,
                 client_secret=config.client_secret,
+                email_config=config.email,
             )
             config = load_config(args.config)
         else:
@@ -476,6 +487,7 @@ def main() -> None:
                     project_id=config.project_id,
                     client_id=config.client_id,
                     client_secret=config.client_secret,
+                    email_config=config.email,
                 )
                 config = load_config(args.config)
 
