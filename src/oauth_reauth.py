@@ -65,12 +65,13 @@ class EmailConfig:
         )
 
 
-def send_reauth_notification_email(email_config: EmailConfig) -> bool:
+def send_reauth_notification_email(email_config: EmailConfig, auth_url: str) -> bool:
     """
     Send an email notification that OAuth reauthorization is needed.
 
     Args:
         email_config: Email configuration with SMTP settings.
+        auth_url: The OAuth authorization URL to include in the email.
 
     Returns:
         True if email sent successfully, False otherwise.
@@ -83,9 +84,12 @@ def send_reauth_notification_email(email_config: EmailConfig) -> bool:
     subject = f"Nest Thermostat Logger - OAuth Reauthorization Needed ({hostname})"
     body = f"""The Nest Thermostat Logger on {hostname} needs you to complete OAuth reauthorization.
 
-A browser window should have opened on the machine. If you have remote access, please complete the authorization flow.
+Click here to authorize:
+{auth_url}
 
-If you're not at the machine, the poller will continue waiting (up to 7 days) for you to authorize.
+After authorizing, you'll be redirected to localhost:8085 which will be captured by the poller running on {hostname}.
+
+The poller will continue waiting (up to 7 days) for you to authorize.
 
 This is an automated message from the Nest Thermostat Logger.
 """
@@ -400,7 +404,7 @@ def perform_reauthorization(
 
         # Send email notification if configured
         if email_config:
-            send_reauth_notification_email(email_config)
+            send_reauth_notification_email(email_config, auth_url)
 
         # Wait for callback
         auth_code = wait_for_authorization_code(timeout_seconds)
