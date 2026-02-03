@@ -28,6 +28,10 @@ import requests
 
 LOCKFILE_PATH = pathlib.Path(tempfile.gettempdir()) / "nest_poller_reauth.lock"
 
+# File for remote authorization - user can save auth code here from another machine
+# This file is checked alongside the HTTP callback for cross-machine OAuth flow
+PENDING_AUTH_CODE_FILENAME = "pending_auth_code.txt"
+
 REAUTH_REDIRECT_PORT = 8085
 REAUTH_REDIRECT_URI = f"http://localhost:{REAUTH_REDIRECT_PORT}"
 PCM_AUTH_URL_TEMPLATE = (
@@ -65,13 +69,18 @@ class EmailConfig:
         )
 
 
-def send_reauth_notification_email(email_config: EmailConfig, auth_url: str) -> bool:
+def send_reauth_notification_email(
+    email_config: EmailConfig,
+    auth_url: str,
+    config_path: Optional[pathlib.Path] = None,
+) -> bool:
     """
     Send an email notification that OAuth reauthorization is needed.
 
     Args:
         email_config: Email configuration with SMTP settings.
         auth_url: The OAuth authorization URL to include in the email.
+        config_path: Path to config.json (for pending auth code file path in email).
 
     Returns:
         True if email sent successfully, False otherwise.
@@ -82,13 +91,35 @@ def send_reauth_notification_email(email_config: EmailConfig, auth_url: str) -> 
 
     hostname = socket.gethostname()
     subject = f"Nest Thermostat Logger - OAuth Reauthorization Needed ({hostname})"
+
+    # Build the pending auth code file path info for the email
+    pending_file_info = ""
+    if config_path:
+        pending_file = _get_pending_auth_code_path(config_path)
+        pending_file_info = f"""
+AUTHORIZING FROM A DIFFERENT MACHINE:
+If you are reading this email on a different computer than {hostname}, you can still
+complete the authorization:
+
+1. Click the authorization link above and complete the OAuth flow
+2. You'll be redirected to a URL like: http://localhost:8085/?code=XXXXX&scope=...
+3. The page won't load (that's expected), but copy the "code" value from the URL
+   (everything between "code=" and "&scope")
+4. Save ONLY that code to this file on your shared drive:
+   {pending_file}
+5. The poller on {hostname} will detect the file and complete the authorization
+
+"""
+
     body = f"""The Nest Thermostat Logger on {hostname} needs you to complete OAuth reauthorization.
 
 Click here to authorize:
 {auth_url}
 
-After authorizing, you'll be redirected to localhost:8085 which will be captured by the poller running on {hostname}.
-
+AUTHORIZING FROM {hostname.upper()} (SAME MACHINE):
+After authorizing, you'll be redirected to localhost:8085 which will be captured
+automatically by the poller running on this machine.
+{pending_file_info}
 The poller will continue waiting (up to 7 days) for you to authorize.
 
 This is an automated message from the Nest Thermostat Logger.
@@ -144,6 +175,49 @@ def _release_reauth_lock() -> None:
     """Release the re-authorization lock."""
     try:
         LOCKFILE_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _get_pending_auth_code_path(config_path: pathlib.Path) -> pathlib.Path:
+    """Get the path to the pending auth code file (in same directory as config)."""
+    return config_path.parent / PENDING_AUTH_CODE_FILENAME
+
+
+def _check_pending_auth_code_file(config_path: pathlib.Path) -> Optional[str]:
+    """Check if a pending auth code file exists and read the code from it.
+
+    This supports remote authorization where the user completes OAuth on a different
+    machine and saves the authorization code to this file on the shared drive.
+
+    Args:
+        config_path: Path to config.json (used to determine the config directory).
+
+    Returns:
+        The authorization code if found, None otherwise.
+    """
+    pending_file = _get_pending_auth_code_path(config_path)
+    if not pending_file.exists():
+        return None
+
+    try:
+        content = pending_file.read_text(encoding="utf-8").strip()
+        if content:
+            logging.info("Found pending authorization code from file: %s", pending_file)
+            # Blank out the file after reading to prevent reuse (but keep file for convenience)
+            pending_file.write_text("", encoding="utf-8")
+            return content
+    except OSError as e:
+        logging.warning("Error reading pending auth code file: %s", e)
+    return None
+
+
+def _clear_pending_auth_code_file(config_path: pathlib.Path) -> None:
+    """Clear the pending auth code file if it exists (blank it out, don't delete)."""
+    pending_file = _get_pending_auth_code_path(config_path)
+    try:
+        if pending_file.exists():
+            pending_file.write_text("", encoding="utf-8")
     except OSError:
         pass
 
@@ -217,17 +291,23 @@ class OAuthCallbackServer(http.server.HTTPServer):
         self.callback_received = threading.Event()
 
 
-def wait_for_authorization_code(timeout_seconds: int = DEFAULT_REAUTH_TIMEOUT_SECONDS) -> str:
-    """Start local server and wait for OAuth callback.
+def wait_for_authorization_code(
+    timeout_seconds: int = DEFAULT_REAUTH_TIMEOUT_SECONDS,
+    config_path: Optional[pathlib.Path] = None,
+) -> str:
+    """Start local server and wait for OAuth callback or file-based code.
 
-    The server runs continuously until the OAuth callback is received or timeout.
-    This allows waiting for days if needed (user may not be logged in).
+    The server runs continuously until the OAuth callback is received, a pending
+    auth code file is found, or timeout. This allows waiting for days if needed
+    (user may not be logged in), and supports authorization from a remote machine
+    via the pending_auth_code.txt file.
 
     Args:
         timeout_seconds: Maximum time to wait for authorization (default: 7 days).
+        config_path: Path to config.json (for checking pending auth code file).
 
     Returns:
-        The authorization code from the callback.
+        The authorization code from the callback or file.
 
     Raises:
         RuntimeError: If authorization fails or times out.
@@ -253,14 +333,39 @@ def wait_for_authorization_code(timeout_seconds: int = DEFAULT_REAUTH_TIMEOUT_SE
     if timeout_days >= 1:
         logging.info(
             "Waiting for OAuth callback (timeout: %.1f days). "
-            "Complete authorization in the browser tab when you log in.",
+            "Complete authorization in the browser or save code to pending_auth_code.txt.",
             timeout_days
         )
     else:
         logging.info("Waiting for OAuth callback (timeout: %d seconds)...", timeout_seconds)
 
-    # Wait for callback with timeout
-    if not server.callback_received.wait(timeout=timeout_seconds):
+    # Wait for callback with timeout, also checking for file-based code
+    # We check the file every 5 seconds instead of blocking for the full timeout
+    import time
+    check_interval = 5  # seconds
+    elapsed = 0
+    while elapsed < timeout_seconds:
+        # Check for file-based authorization code (for remote machine support)
+        if config_path:
+            file_code = _check_pending_auth_code_file(config_path)
+            if file_code:
+                server.server_close()
+                return file_code
+
+        # Wait for HTTP callback (with short timeout to allow file checks)
+        if server.callback_received.wait(timeout=check_interval):
+            break
+        elapsed += check_interval
+
+    # Check one more time if we timed out
+    if not server.callback_received.is_set():
+        # One final file check
+        if config_path:
+            file_code = _check_pending_auth_code_file(config_path)
+            if file_code:
+                server.server_close()
+                return file_code
+
         server.server_close()
         raise RuntimeError(
             f"OAuth authorization timed out after {timeout_seconds} seconds. "
@@ -345,6 +450,51 @@ class ReauthorizationInProgressError(RuntimeError):
     """Raised when another re-authorization is already in progress."""
 
 
+def complete_authorization_with_code(
+    config_path: pathlib.Path,
+    auth_code: str,
+    client_id: str,
+    client_secret: str,
+) -> tuple[str, str]:
+    """Complete OAuth authorization using a manually provided authorization code.
+
+    This is useful when the user completed OAuth on a different machine and wants
+    to manually provide the authorization code instead of using the file mechanism.
+
+    Args:
+        config_path: Path to config.json file.
+        auth_code: The authorization code from the OAuth redirect URL.
+        client_id: OAuth client ID.
+        client_secret: OAuth client secret.
+
+    Returns:
+        Tuple of (access_token, refresh_token).
+
+    Raises:
+        RuntimeError: If token exchange fails.
+    """
+    logging.info("Exchanging manually provided authorization code for tokens...")
+
+    # Exchange code for tokens
+    access_token, refresh_token = exchange_code_for_tokens(
+        code=auth_code,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+    # Update config.json
+    update_config_refresh_token(config_path, refresh_token)
+
+    # Clear any pending auth code file that might exist
+    _clear_pending_auth_code_file(config_path)
+
+    # Release any existing reauth lock since we've completed authorization
+    _release_reauth_lock()
+
+    logging.info("Authorization complete with manually provided code!")
+    return access_token, refresh_token
+
+
 def perform_reauthorization(
     config_path: pathlib.Path,
     project_id: str,
@@ -404,10 +554,10 @@ def perform_reauthorization(
 
         # Send email notification if configured
         if email_config:
-            send_reauth_notification_email(email_config, auth_url)
+            send_reauth_notification_email(email_config, auth_url, config_path)
 
-        # Wait for callback
-        auth_code = wait_for_authorization_code(timeout_seconds)
+        # Wait for callback (from HTTP or from pending_auth_code.txt file)
+        auth_code = wait_for_authorization_code(timeout_seconds, config_path)
         logging.info("Received authorization code, exchanging for tokens...")
 
         # Exchange code for tokens

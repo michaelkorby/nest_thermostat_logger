@@ -16,6 +16,7 @@ import requests
 from src.oauth_reauth import (
     EmailConfig,
     ReauthorizationInProgressError,
+    complete_authorization_with_code,
     perform_reauthorization,
     update_config_refresh_token,
 )
@@ -446,6 +447,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force re-authorization even if current refresh token is valid.",
     )
+    parser.add_argument(
+        "--auth-code",
+        type=str,
+        help="Manually provide an OAuth authorization code (from a remote machine's redirect URL).",
+    )
     return parser.parse_args()
 
 
@@ -465,8 +471,18 @@ def main() -> None:
     try:
         config = load_config(args.config)
 
+        # Handle --auth-code flag (manual code submission from remote machine)
+        if args.auth_code:
+            logging.info("Using manually provided authorization code...")
+            access_token, new_refresh_token = complete_authorization_with_code(
+                config_path=args.config,
+                auth_code=args.auth_code,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+            )
+            config = load_config(args.config)
         # Handle --reauth flag or expired refresh token
-        if args.reauth:
+        elif args.reauth:
             logging.info("Forcing re-authorization as requested...")
             access_token, new_refresh_token = perform_reauthorization(
                 config_path=args.config,
