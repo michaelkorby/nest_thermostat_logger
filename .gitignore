@@ -10,6 +10,5 @@ __pycache__/
 /logs/
 desktop.ini
 private_notes.md
-
 streamlit.log
-streamlit.log
+pending_auth_code.txt
