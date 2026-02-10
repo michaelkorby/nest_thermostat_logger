@@ -23,8 +23,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from src import nest_poller
 from src.oauth_reauth import (
     ReauthorizationInProgressError,
+    complete_authorization_with_code,
     perform_reauthorization,
     update_config_refresh_token,
+    _check_pending_auth_code_file,
 )
 
 POLL_INTERVAL_SECONDS = 5 * 60  # 5 minutes
@@ -119,6 +121,33 @@ def run_single_poll(config_path: pathlib.Path) -> bool:
         return True
 
     except ReauthorizationInProgressError as exc:
+        # Check if there's a pending auth code file we can use
+        pending_code = _check_pending_auth_code_file(config_path)
+        if pending_code:
+            logging.info("Found pending authorization code, completing auth...")
+            try:
+                config = nest_poller.load_config(config_path)
+                access_token, _ = complete_authorization_with_code(
+                    config_path=config_path,
+                    auth_code=pending_code,
+                    client_id=config.client_id,
+                    client_secret=config.client_secret,
+                )
+                logging.info("Authorization completed from pending code file!")
+
+                # Now fetch and log data immediately instead of waiting for next poll
+                logging.info("Fetching thermostat data...")
+                config = nest_poller.load_config(config_path)
+                devices = nest_poller.fetch_devices(config, access_token)
+                rows = nest_poller.extract_thermostat_rows(devices, config)
+                if rows:
+                    nest_poller.write_rows(rows, config)
+                else:
+                    logging.warning("No thermostat devices found.")
+                return True
+            except Exception as code_exc:
+                logging.error("Failed to complete authorization with pending code: %s", code_exc)
+                return False
         logging.warning("%s", exc)
         return True  # Not a failure, just waiting for user
     except nest_poller.NestPollerError as exc:

@@ -103,9 +103,8 @@ complete the authorization:
 
 1. Click the authorization link above and complete the OAuth flow
 2. You'll be redirected to a URL like: http://localhost:8085/?code=XXXXX&scope=...
-3. The page won't load (that's expected), but copy the "code" value from the URL
-   (everything between "code=" and "&scope")
-4. Save ONLY that code to this file on your shared drive:
+3. The page won't load (that's expected) - copy the ENTIRE URL from your browser
+4. Paste the URL into this file on your shared drive:
    {pending_file}
 5. The poller on {hostname} will detect the file and complete the authorization
 
@@ -184,11 +183,40 @@ def _get_pending_auth_code_path(config_path: pathlib.Path) -> pathlib.Path:
     return config_path.parent / PENDING_AUTH_CODE_FILENAME
 
 
+def _extract_code_from_content(content: str) -> Optional[str]:
+    """Extract the authorization code from content that may be a URL or just the code.
+
+    Supports:
+    - Full URL: http://localhost:8085/?code=XXXXX&scope=...
+    - Just the code: 4/0ASc3gC1zlT...
+
+    Returns:
+        The extracted authorization code, or None if not found.
+    """
+    content = content.strip()
+    if not content:
+        return None
+
+    # Check if it looks like a URL with a code parameter
+    if "code=" in content:
+        parsed = urllib.parse.urlparse(content)
+        query_params = urllib.parse.parse_qs(parsed.query)
+        if "code" in query_params:
+            return query_params["code"][0]
+
+    # Otherwise assume the content is the code itself
+    return content
+
+
 def _check_pending_auth_code_file(config_path: pathlib.Path) -> Optional[str]:
     """Check if a pending auth code file exists and read the code from it.
 
     This supports remote authorization where the user completes OAuth on a different
     machine and saves the authorization code to this file on the shared drive.
+
+    The file can contain either:
+    - The full redirect URL (e.g., http://localhost:8085/?code=XXXXX&scope=...)
+    - Just the authorization code itself
 
     Args:
         config_path: Path to config.json (used to determine the config directory).
@@ -202,11 +230,12 @@ def _check_pending_auth_code_file(config_path: pathlib.Path) -> Optional[str]:
 
     try:
         content = pending_file.read_text(encoding="utf-8").strip()
-        if content:
+        code = _extract_code_from_content(content)
+        if code:
             logging.info("Found pending authorization code from file: %s", pending_file)
             # Blank out the file after reading to prevent reuse (but keep file for convenience)
             pending_file.write_text("", encoding="utf-8")
-            return content
+            return code
     except OSError as e:
         logging.warning("Error reading pending auth code file: %s", e)
     return None
