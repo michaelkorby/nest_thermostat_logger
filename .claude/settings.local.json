@@ -1,7 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(dir \"C:\\\\venvs\\\\nest_thermostat_logger_%COMPUTERNAME%\\\\Scripts\\\\streamlit.exe\")",
+      "Bash(dir \"C:\\\\venvs\")",
+      "Bash(dir \"C:\\\\venvs\\\\nest_thermostat_logger_KORBY-SURFACE11\\\\Scripts\\\\streamlit.exe\")",
+      "Bash(C:venvsnest_thermostat_logger_KORBY-SURFACE11Scriptsstreamlit.exe --version)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix start_dashboard.bat to use venv''s python directly\n\nThe activate.bat approach failed when the .cmd wrapper invoked the\nsystem Python instead of the venv''s interpreter.  Using the full path\nto the venv''s python.exe with -m streamlit avoids PATH issues,\nespecially when running as an NSSM service.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(C:venvsnest_thermostat_logger_DESKTOP-RLR55FCScriptspython.exe -c \"from src import poller_scheduler; print\\(''Import successful''\\)\")",
+      "Bash(cmd.exe /c \"cd /d \"\"c:\\\\Users\\\\mkorb\\\\My Drive\\\\Code\\\\nest_thermostat_logger\"\" && C:\\\\venvs\\\\nest_thermostat_logger_DESKTOP-RLR55FC\\\\Scripts\\\\python.exe -c \"\"from src import poller_scheduler; print\\(''Import successful''\\)\"\"\")",
+      "Bash(cmd.exe /c \"cd /d \"\"c:\\\\Users\\\\mkorb\\\\My Drive\\\\Code\\\\nest_thermostat_logger\"\" && start_poller.bat --help\")",
+      "Bash(cmd.exe:*)",
+      "Bash(git commit:*)",
+      "Bash(git rm *)"
     ]
   }
 }
