@@ -116,7 +116,7 @@ pip install -r requirements.txt
    - Outdoor temperature (if weather configuration is provided)
    - Current HVAC status (`HEATING`, `COOLING`, or `OFF`)
 
-4. Launch the Streamlit dashboard (scheduled as a service via NSSM, details below):
+4. Launch the Streamlit dashboard (runs as a Windows service — see [Dashboard](#dashboard) below):
 
    ```bash
    streamlit run src/dashboard.py
@@ -126,46 +126,111 @@ pip install -r requirements.txt
 
     > The repository includes `.streamlit/credentials.toml` with an empty email so Streamlit can start headlessly (useful for services). The helper script `start_dashboard.bat` automatically points `STREAMLIT_CONFIG_DIR` to that folder and disables usage-stat prompts.
 
-The helper script `start_dashboard.bat` automatically looks for the virtual environment in `C:\venvs\nest_thermostat_logger_%COMPUTERNAME%` (with fallback to old project-directory locations for migration). When configuring Task Scheduler on each computer, point to the matching `python.exe`:
+## Scheduling (Poller Service)
 
-```
-Program/script: C:\venvs\nest_thermostat_logger_%COMPUTERNAME%\Scripts\python.exe
-```
+The poller runs as a Windows service managed by **NSSM** so it polls every five minutes automatically, starts with Windows, and keeps running without anyone logged in.
 
-## Scheduling
+**This is set up on the basement computer.**
 
-To collect data continuously, schedule the poller with Windows Task Scheduler (or your preferred scheduler) to run every five minutes:
+### How it works
 
-1. Open **Task Scheduler** → **Create Task…** (not *Basic Task*, so you can set the repeat interval).
-2. On the **General** tab:
-   - Name: `Nest Thermostat Logger`
-   - Select **Run whether user is logged on or not** and **Run with highest privileges**.
-3. On the **Triggers** tab → **New…**:
-   - Begin the task: **On a schedule**.
-   - Settings: **Daily**, start at 12:00:00 AM.
-   - Check **Repeat task every:** `5 minutes`.
-   - Set **for a duration of:** `Indefinitely`.
-   - Ensure the trigger is **Enabled** and click **OK**.
-4. On the **Actions** tab → **New…**, configure the poller via your virtual environment, for example:
+`start_poller.bat` calls `poller_scheduler.py --duration 0` (run forever), which loops every 5 minutes polling the Nest API. The scheduler handles `SIGTERM` gracefully — NSSM sends this signal when the service is stopped, so the current poll finishes cleanly before the process exits.
 
+### Service account (important for Google Drive)
+
+If the project files live in your Google Drive folder (e.g. `C:\Users\mkorb\My Drive\...`), the service must run as **your Windows user account**, not Local System. Local System cannot access user-profile paths. `install_poller_service.bat` prompts for your username and password and grants the account the *Log on as a service* right automatically.
+
+> **Google Drive sync note:** Google Drive for Desktop must be configured in **Mirror** mode (files stored locally) for the poller to read/write CSV files while no user is interactively logged in. In Stream mode, files are fetched on demand and may not be available without an active user session.
+
+### Installing the poller service
+
+1. Download and install NSSM from <https://nssm.cc/download>. Place `nssm.exe` at `C:\nssm\win64\nssm.exe`.
+2. Run `install_poller_service.bat` from an **elevated** (Run as Administrator) Command Prompt:
+
+   ```bat
+   install_poller_service.bat
    ```
-   Program/script: C:\venvs\nest_thermostat_logger_%COMPUTERNAME%\Scripts\python.exe
-   Add arguments: -m src.nest_poller --config config.json --log-file logs\poller.log
-   Start in: C:\Users\mkorb\My Drive\Code\nest_thermostat_logger
+
+   The script will:
+   - Install the `NestPoller` service pointing to `start_poller.bat`
+   - Prompt for your Windows username/password to run as your user account
+   - Configure stdout/stderr log rotation (~5 MB cap)
+   - Set the service to auto-start with Windows
+   - Automatically remove the old `Nest Thermostat Logger` Task Scheduler task (if present)
+   - Start the service immediately
+
+3. Confirm it’s running:
+
+   ```bat
+   nssm status NestPoller
    ```
-5. On the **Conditions** tab, uncheck **Start the task only if the computer is on AC power** (optional).
-6. On the **Settings** tab, enable **Allow task to be run on demand** and ensure **If the task is already running, then the following rule applies: Do not start a new instance**.
 
-Click **OK**, supply your account password if prompted, and verify the task appears in the scheduler library. Ensure the account running the task has read access to `config.json` and write access to `logs/`.
+   You should see `SERVICE_RUNNING`. Check `logs\poller_service.log` to confirm polls are succeeding.
 
-**NOTE: It doesn't seem to start running every 5 minutes until it crosses the initial start time boundary. If it's set to midnight, will need to wait until midnight for it start running.**
+### Common management commands
 
-> **Tip:** The `--log-file` argument overwrites `logs/poller.log` every run, so you always have the latest poll execution details. Remove the flag if you prefer writing logs only to Task Scheduler’s history.
+| Goal | Command |
+|---|---|
+| Stop the poller | `nssm stop NestPoller` |
+| Restart the poller | `nssm restart NestPoller` |
+| Open the GUI editor | `nssm edit NestPoller` |
+| Remove the service | `nssm remove NestPoller confirm` |
+| View service status | `nssm status NestPoller` |
 
-**This is set up on the basement computer**
+### Troubleshooting
+
+- **Service starts but no data in `logs/`:** Check `logs\poller_service_error.log`. Most likely the virtual environment path is wrong or `config.json` is missing.
+- **Access denied errors:** The service is running as Local System but the project is in a Google Drive folder. Re-run `install_poller_service.bat` and supply your Windows credentials when prompted.
+- **Service stops after a poll and doesn’t restart:** This should not happen — `--duration 0` runs forever. If it does, open `nssm edit NestPoller` → **Exit actions** tab and set **Restart if exit code is** to `0` and `1`.
 
 ## Dashboard
-Streamlit dashboard is set up via nssm on the basement computer. The name of the service is "NestDashboard". It calls start_dashboard.bat.
+
+The Streamlit dashboard runs as a Windows service managed by **NSSM** (Non-Sucking Service Manager), so it starts automatically with Windows and keeps running without anyone being logged in. The service is named `NestDashboard` and invokes `start_dashboard.bat`.
+
+**This is set up on the basement computer.**
+
+### Installing NSSM
+
+1. Download NSSM from <https://nssm.cc/download> (grab the latest release zip).
+2. Extract the zip and copy `nssm.exe` to a permanent location such as `C:\tools\nssm\` or add the `win64` folder from the zip to your `PATH`.
+
+### Creating the Service
+
+Run `install_dashboard_service.bat` from an **elevated** (Run as Administrator) Command Prompt:
+
+```bat
+install_dashboard_service.bat
+```
+
+Credentials: mkorb / password for live.com
+
+The script will:
+- Locate `nssm.exe` (from `PATH` or `C:\tools\nssm\`)
+- Remove any existing `NestDashboard` service (safe to re-run)
+- Install the service pointing to `start_dashboard.bat` in the project folder
+- Configure the working directory, stdout/stderr log rotation, and auto-start
+- Start the service immediately
+
+On success you'll see `NestDashboard service installed and started successfully.`
+
+Open a browser to `http://localhost:8501` to verify the dashboard loads.
+
+### Common Management Commands
+
+| Goal | Command |
+|---|---|
+| Stop the service | `nssm stop NestDashboard` |
+| Restart the service | `nssm restart NestDashboard` |
+| Open the GUI editor | `nssm edit NestDashboard` |
+| Remove the service | `nssm remove NestDashboard confirm` |
+| View service status | `nssm status NestDashboard` |
+
+### Troubleshooting
+
+- **Service starts but dashboard is unreachable:** Check `logs\dashboard_error.log` for Python or Streamlit errors. Make sure the virtual environment exists at `C:\venvs\nest_thermostat_logger_%COMPUTERNAME%`.
+- **Service won't start:** Run `start_dashboard.bat` manually from the project folder first to confirm it works interactively, then re-check the path passed to `nssm install`.
+- **Port conflict:** Streamlit defaults to port `8501`. If another process owns it, add `--server.port=8502` (or any free port) to the `streamlit run` line in `start_dashboard.bat` and update any bookmarks accordingly.
+- **Logs keep growing:** `AppRotateBytes 1048576` caps each log at ~1 MB before rotating. Increase or remove that setting if you need more history.
 
 ## Automatic Re-authorization
 

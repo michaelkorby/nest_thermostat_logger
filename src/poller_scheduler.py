@@ -31,6 +31,7 @@ from src.oauth_reauth import (
 
 POLL_INTERVAL_SECONDS = 5 * 60  # 5 minutes
 DEFAULT_RUN_DURATION_HOURS = 24
+RUN_FOREVER = 0  # Sentinel: pass --duration 0 to run indefinitely (NSSM service mode)
 
 
 class GracefulShutdown:
@@ -160,24 +161,27 @@ def run_single_poll(config_path: pathlib.Path) -> bool:
 
 def run_scheduler(
     config_path: pathlib.Path,
-    duration_hours: float,
+    duration_hours: Optional[float],
     poll_interval_seconds: int,
     shutdown: GracefulShutdown,
 ) -> None:
-    """Run the polling loop for the specified duration."""
+    """Run the polling loop. Pass duration_hours=None to run indefinitely."""
 
-    end_time = datetime.now() + timedelta(hours=duration_hours)
+    end_time = None if duration_hours is None else datetime.now() + timedelta(hours=duration_hours)
     poll_count = 0
     error_count = 0
 
-    logging.info(
-        "Starting poller scheduler. Will run until %s (%.1f hours)",
-        end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        duration_hours,
-    )
+    if end_time is None:
+        logging.info("Starting poller scheduler in service mode (runs indefinitely).")
+    else:
+        logging.info(
+            "Starting poller scheduler. Will run until %s (%.1f hours)",
+            end_time.strftime("%Y-%m-%d %H:%M:%S"),
+            duration_hours,
+        )
     logging.info("Poll interval: %d seconds (%d minutes)", poll_interval_seconds, poll_interval_seconds // 60)
 
-    while datetime.now() < end_time and not shutdown.should_exit:
+    while (end_time is None or datetime.now() < end_time) and not shutdown.should_exit:
         poll_count += 1
         logging.info("=== Poll #%d starting ===", poll_count)
 
@@ -191,7 +195,7 @@ def run_scheduler(
         )
 
         # Calculate sleep time, but check for shutdown/end periodically
-        if datetime.now() < end_time and not shutdown.should_exit:
+        if (end_time is None or datetime.now() < end_time) and not shutdown.should_exit:
             next_poll = datetime.now() + timedelta(seconds=poll_interval_seconds)
             logging.info("Next poll at %s", next_poll.strftime("%H:%M:%S"))
 
@@ -204,8 +208,8 @@ def run_scheduler(
 
     if shutdown.should_exit:
         logging.info("Scheduler stopped by user request.")
-    else:
-        logging.info("Scheduler completed 24-hour run.")
+    elif end_time is not None:
+        logging.info("Scheduler completed %s-hour run.", duration_hours)
 
     logging.info(
         "Final stats: %d polls completed, %d errors",
@@ -239,7 +243,7 @@ def parse_args() -> argparse.Namespace:
         "--duration",
         type=float,
         default=DEFAULT_RUN_DURATION_HOURS,
-        help="How many hours to run (default: 24).",
+        help="How many hours to run (default: 24). Pass 0 to run indefinitely (NSSM service mode).",
     )
     parser.add_argument(
         "--interval",
@@ -258,10 +262,11 @@ def main() -> None:
 
     shutdown = GracefulShutdown()
 
+    duration = None if args.duration == RUN_FOREVER else args.duration
     try:
         run_scheduler(
             config_path=args.config,
-            duration_hours=args.duration,
+            duration_hours=duration,
             poll_interval_seconds=args.interval,
             shutdown=shutdown,
         )
