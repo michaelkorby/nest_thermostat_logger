@@ -223,8 +223,6 @@ Run `install_dashboard_service.bat` from an **elevated** (Run as Administrator) 
 install_dashboard_service.bat
 ```
 
-Credentials: mkorb / password for live.com
-
 The script will:
 - Locate `nssm.exe` (from `PATH` or `C:\tools\nssm\`)
 - Remove any existing `NestDashboard` service (safe to re-run)
