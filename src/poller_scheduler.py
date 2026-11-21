@@ -1,9 +1,9 @@
 """
-Long-running poller scheduler that runs for 24 hours.
+Long-running Nest poller scheduler.
 
-Start this script once (e.g., via Windows Task Scheduler at midnight) and it will
-poll the Nest API every 5 minutes until the 24-hour window expires. This is more
-reliable than depending on Task Scheduler to fire every 5 minutes.
+Run as the NestPoller NSSM service with --duration 0 to poll every 5 minutes
+indefinitely. After each poll it writes poller_status.json (read by the
+dashboard) and periodically copies the data into a Google Drive folder.
 """
 
 from __future__ import annotations
@@ -21,13 +21,9 @@ from typing import Optional
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from src import nest_poller
-from src.oauth_reauth import (
-    ReauthorizationInProgressError,
-    complete_authorization_with_code,
-    perform_reauthorization,
-    update_config_refresh_token,
-    _check_pending_auth_code_file,
-)
+from src.drive_sync import DriveFolderSync
+from src.oauth_reauth import NonBlockingReauth, update_config_refresh_token
+from src.poller_status import write_status
 
 POLL_INTERVAL_SECONDS = 5 * 60  # 5 minutes
 DEFAULT_RUN_DURATION_HOURS = 24
@@ -83,27 +79,68 @@ def setup_logging(log_dir: pathlib.Path, log_level: str) -> pathlib.Path:
     return log_file
 
 
-def run_single_poll(config_path: pathlib.Path) -> bool:
-    """
-    Run a single poll cycle.
+class PollerState:
+    """State carried between poll cycles."""
 
-    Returns True if successful, False if an error occurred.
+    def __init__(self) -> None:
+        self.reauth: Optional[NonBlockingReauth] = None
+        self.drive_sync: Optional[DriveFolderSync] = None
+        self.last_error: Optional[str] = None
+        self.last_success_at: Optional[float] = None
+        self.consecutive_failures = 0
+        self.output_dir: Optional[pathlib.Path] = None
+        self.started_at = time.time()
+
+    def end_reauth(self) -> None:
+        if self.reauth is not None:
+            self.reauth.close()
+            self.reauth = None
+
+    def configure_drive_sync(self, config: "nest_poller.Config") -> None:
+        if config.drive_sync_dir is None:
+            self.drive_sync = None
+        elif self.drive_sync is None or self.drive_sync.drive_dir != config.drive_sync_dir:
+            self.drive_sync = DriveFolderSync(config.drive_sync_dir, config.drive_sync_interval_minutes)
+
+
+def run_single_poll(config_path: pathlib.Path, state: PollerState) -> bool:
+    """
+    Run a single poll cycle. Never blocks waiting for the user: if the refresh
+    token has expired, it advances re-authorization by one step and returns.
+
+    Returns True if data was logged, False otherwise. The reason for a failure
+    is recorded in state.last_error for the dashboard.
     """
     try:
         config = nest_poller.load_config(config_path)
+        state.output_dir = config.output_dir
+        state.configure_drive_sync(config)
+        new_refresh_token = None
 
         try:
             access_token, new_refresh_token = nest_poller.refresh_access_token(config)
+            if state.reauth is not None:
+                logging.info("Refresh token is valid again; cancelling pending re-authorization.")
+                state.end_reauth()
         except nest_poller.RefreshTokenExpiredError as exc:
-            logging.warning("Refresh token expired: %s", exc)
-            logging.info("Starting automatic re-authorization...")
-            access_token, new_refresh_token = perform_reauthorization(
-                config_path=config_path,
-                project_id=config.project_id,
-                client_id=config.client_id,
-                client_secret=config.client_secret,
-                email_config=config.email,
-            )
+            if state.reauth is None:
+                logging.warning("Refresh token expired: %s", exc)
+                logging.info("Starting non-blocking re-authorization...")
+                extra = [state.drive_sync.pending_code_file] if state.drive_sync else []
+                state.reauth = NonBlockingReauth(
+                    config_path=config_path,
+                    project_id=config.project_id,
+                    client_id=config.client_id,
+                    client_secret=config.client_secret,
+                    email_config=config.email,
+                    extra_pending_files=extra,
+                    dashboard_url=config.dashboard_url,
+                )
+            access_token = state.reauth.step()
+            if access_token is None:
+                state.last_error = state.reauth.last_error or "Nest sign-in expired; waiting for re-authorization."
+                return False
+            state.end_reauth()
             config = nest_poller.load_config(config_path)
 
         # Save new refresh token if provided
@@ -116,47 +153,41 @@ def run_single_poll(config_path: pathlib.Path) -> bool:
 
         if not rows:
             logging.warning("No thermostat devices found.")
-            return True  # Not an error, just no devices
+            state.last_error = "Nest returned no thermostats."
+            return False
 
         nest_poller.write_rows(rows, config)
+        state.last_error = None
+        state.last_success_at = time.time()
         return True
 
-    except ReauthorizationInProgressError as exc:
-        # Check if there's a pending auth code file we can use
-        pending_code = _check_pending_auth_code_file(config_path)
-        if pending_code:
-            logging.info("Found pending authorization code, completing auth...")
-            try:
-                config = nest_poller.load_config(config_path)
-                access_token, _ = complete_authorization_with_code(
-                    config_path=config_path,
-                    auth_code=pending_code,
-                    client_id=config.client_id,
-                    client_secret=config.client_secret,
-                )
-                logging.info("Authorization completed from pending code file!")
-
-                # Now fetch and log data immediately instead of waiting for next poll
-                logging.info("Fetching thermostat data...")
-                config = nest_poller.load_config(config_path)
-                devices = nest_poller.fetch_devices(config, access_token)
-                rows = nest_poller.extract_thermostat_rows(devices, config)
-                if rows:
-                    nest_poller.write_rows(rows, config)
-                else:
-                    logging.warning("No thermostat devices found.")
-                return True
-            except Exception as code_exc:
-                logging.error("Failed to complete authorization with pending code: %s", code_exc)
-                return False
-        logging.warning("%s", exc)
-        return True  # Not a failure, just waiting for user
     except nest_poller.NestPollerError as exc:
         logging.error("Poller error: %s", exc)
+        state.last_error = str(exc)
         return False
     except Exception as exc:
         logging.exception("Unexpected error during poll: %s", exc)
+        state.last_error = f"Unexpected error: {exc}"
         return False
+
+
+def _write_status(config_path: pathlib.Path, state: PollerState, poll_interval_seconds: int) -> None:
+    reauth = state.reauth
+    sync = state.drive_sync
+    write_status(config_path.parent, {
+        "updated_at": time.time(),
+        "started_at": state.started_at,
+        "poll_interval_seconds": poll_interval_seconds,
+        "last_success_at": state.last_success_at,
+        "last_error": state.last_error,
+        "consecutive_failures": state.consecutive_failures,
+        "reauth_needed": reauth is not None,
+        "reauth_since": reauth.waiting_since if reauth else None,
+        "auth_url": reauth.auth_url if reauth else None,
+        "drive_sync_dir": str(sync.drive_dir) if sync else None,
+        "drive_sync_last_at": sync.last_sync_at if sync else None,
+        "drive_sync_error": sync.last_error if sync else None,
+    })
 
 
 def run_scheduler(
@@ -170,6 +201,7 @@ def run_scheduler(
     end_time = None if duration_hours is None else datetime.now() + timedelta(hours=duration_hours)
     poll_count = 0
     error_count = 0
+    state = PollerState()
 
     if end_time is None:
         logging.info("Starting poller scheduler in service mode (runs indefinitely).")
@@ -185,9 +217,16 @@ def run_scheduler(
         poll_count += 1
         logging.info("=== Poll #%d starting ===", poll_count)
 
-        success = run_single_poll(config_path)
+        success = run_single_poll(config_path, state)
         if not success:
             error_count += 1
+            state.consecutive_failures += 1
+        else:
+            state.consecutive_failures = 0
+
+        if state.drive_sync is not None and state.output_dir is not None:
+            state.drive_sync.maybe_sync(state.output_dir)
+        _write_status(config_path, state, poll_interval_seconds)
 
         logging.info(
             "Poll #%d complete. Total: %d polls, %d errors",
@@ -200,11 +239,20 @@ def run_scheduler(
             logging.info("Next poll at %s", next_poll.strftime("%H:%M:%S"))
 
             # Sleep in smaller chunks so we can respond to shutdown signals
+            # While waiting for re-authorization, wake up early as soon as an
+            # authorization code arrives (codes expire within minutes).
             sleep_chunk = 10  # seconds
             remaining = poll_interval_seconds
             while remaining > 0 and not shutdown.should_exit:
                 time.sleep(min(sleep_chunk, remaining))
                 remaining -= sleep_chunk
+                if state.reauth is not None and state.reauth.code_available():
+                    logging.info("Authorization code received; polling now.")
+                    break
+
+    state.end_reauth()
+    if state.drive_sync is not None and state.output_dir is not None:
+        state.drive_sync.maybe_sync(state.output_dir, force=True)  # final copy on shutdown
 
     if shutdown.should_exit:
         logging.info("Scheduler stopped by user request.")

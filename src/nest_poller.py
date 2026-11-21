@@ -55,6 +55,9 @@ class Config:
     timezone: ZoneInfo = ZoneInfo("America/New_York")
     weather: Optional[WeatherConfig] = None
     email: Optional[EmailConfig] = None
+    drive_sync_dir: Optional[pathlib.Path] = None
+    drive_sync_interval_minutes: float = 30
+    dashboard_url: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any], base_dir: pathlib.Path) -> "Config":
@@ -105,6 +108,13 @@ class Config:
                 raise NestPollerError("Email config missing required field: recipient")
             email_cfg = EmailConfig.from_dict(email_data)
 
+        drive_sync = data.get("drive_sync") or {}
+        drive_sync_dir = pathlib.Path(drive_sync["dir"]) if drive_sync.get("dir") else None
+        try:
+            drive_sync_interval = float(drive_sync.get("interval_minutes", 30))
+        except (TypeError, ValueError) as exc:
+            raise NestPollerError("drive_sync.interval_minutes must be numeric.") from exc
+
         return cls(
             project_id=data["project_id"],
             client_id=data["client_id"],
@@ -115,6 +125,9 @@ class Config:
             timezone=timezone,
             weather=weather_cfg,
             email=email_cfg,
+            drive_sync_dir=drive_sync_dir,
+            drive_sync_interval_minutes=drive_sync_interval,
+            dashboard_url=data.get("dashboard_url"),
         )
 
 

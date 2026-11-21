@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import sys
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -10,6 +12,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from src.poller_status import read_status  # noqa: E402
+
+PENDING_AUTH_CODE_FILE = BASE_DIR / "pending_auth_code.txt"
 LOG_DIR = (BASE_DIR / "logs").resolve()
 DATE_FORMAT = "%Y-%m-%d"
 
@@ -23,8 +31,15 @@ def list_log_files() -> Dict[str, Path]:
     }
 
 
-@lru_cache(maxsize=32)
 def load_log(filename: str) -> pd.DataFrame:
+    # Key the cache on the file's modification time so new poller data shows
+    # up; caching by filename alone kept the first-loaded data forever.
+    mtime = (LOG_DIR / filename).stat().st_mtime
+    return _load_log_cached(filename, mtime).copy()
+
+
+@lru_cache(maxsize=32)
+def _load_log_cached(filename: str, mtime: float) -> pd.DataFrame:
     file_path = LOG_DIR / filename
     df = pd.read_csv(file_path)
 
@@ -141,9 +156,111 @@ def build_chart(df: pd.DataFrame) -> go.Figure:
     return figure
 
 
+def _ago(ts: Optional[float]) -> str:
+    if not ts:
+        return "never"
+    minutes = (time.time() - ts) / 60
+    if minutes < 1:
+        return "just now"
+    if minutes < 90:
+        return f"{minutes:.0f} min ago"
+    if minutes < 48 * 60:
+        return f"{minutes / 60:.1f} hours ago"
+    return f"{minutes / 1440:.1f} days ago"
+
+
+def _when(ts: Optional[float]) -> str:
+    if not ts:
+        return "never"
+    return dt.datetime.fromtimestamp(ts).strftime("%a %b %d, %I:%M %p")
+
+
+def render_poller_health() -> None:
+    """Show a banner describing whether the poller is healthy."""
+    status = read_status(BASE_DIR)
+    if not status:
+        st.warning(
+            "No poller status found. The NestPoller service may not be running, or it "
+            "hasn't finished its first poll since being updated."
+        )
+        return
+
+    interval = status.get("poll_interval_seconds") or 300
+    updated_at = status.get("updated_at")
+    last_success = status.get("last_success_at")
+    problems = 0
+
+    # 1. Poller not checking in at all (service stopped / crashed / laptop asleep)
+    if updated_at and time.time() - updated_at > 3 * interval:
+        problems += 1
+        st.error(
+            f"**The poller hasn't checked in since {_when(updated_at)} ({_ago(updated_at)}).** "
+            "The NestPoller service may be stopped. From an Administrator prompt run: "
+            r"`C:\nssm\win64\nssm.exe restart NestPoller`, then check `logs\poller.log`."
+        )
+
+    # 2. Nest sign-in expired
+    if status.get("reauth_needed"):
+        problems += 1
+        with st.container(border=True):
+            st.error(
+                f"**Nest sign-in expired {_ago(status.get('reauth_since'))}. "
+                f"No data has been logged since {_when(last_success)}.**"
+            )
+            if status.get("last_error") and "rejected" in status["last_error"]:
+                st.warning(status["last_error"])
+            auth_url = status.get("auth_url")
+            if auth_url:
+                st.markdown(
+                    "1. Click **Sign in to Nest** and approve access to all thermostats.\n"
+                    "2. Google sends you to a `localhost:8085` page. Unless you're on the "
+                    "logger laptop itself, that page **won't load - that's expected**.\n"
+                    "3. Copy the whole address from the browser's address bar, paste it below, "
+                    "and click **Submit**. Do this right away - the code expires within minutes."
+                )
+                st.link_button("Sign in to Nest", auth_url, type="primary")
+            with st.form("auth_code_form", clear_on_submit=True):
+                pasted = st.text_input(
+                    "Redirect URL (http://localhost:8085/?code=...)",
+                    placeholder="http://localhost:8085/?code=4/0A...&scope=...",
+                )
+                if st.form_submit_button("Submit"):
+                    if "code=" not in pasted and not pasted.strip().startswith("4/"):
+                        st.error("That doesn't look like the redirect URL. It should contain `code=`.")
+                    else:
+                        try:
+                            PENDING_AUTH_CODE_FILE.write_text(pasted.strip(), encoding="utf-8")
+                            st.success(
+                                "Saved. The poller checks every 10 seconds - refresh this page in "
+                                "about 30 seconds to confirm the sign-in worked."
+                            )
+                        except OSError as exc:
+                            st.error(f"Couldn't save the code: {exc}")
+
+    # 3. Other poll errors
+    elif status.get("last_error"):
+        problems += 1
+        st.warning(
+            f"**The last poll failed** ({status.get('consecutive_failures', 1)} in a row; "
+            f"last successful reading {_ago(last_success)}): {status['last_error']}"
+        )
+
+    # 4. Google Drive copy
+    if status.get("drive_sync_error"):
+        problems += 1
+        st.warning(f"**Google Drive copy is failing:** {status['drive_sync_error']}")
+
+    if problems == 0:
+        drive = ""
+        if status.get("drive_sync_dir"):
+            drive = f" · copied to Google Drive folder {_ago(status.get('drive_sync_last_at'))}"
+        st.success(f"Poller healthy · last reading {_ago(last_success)}{drive}", icon="✅")
+
+
 def main() -> None:
     st.set_page_config(page_title="Nest Thermostat Dashboard", layout="wide")
     st.title("Nest Thermostat Dashboard")
+    render_poller_health()
     st.caption("Choose a thermostat and time range to explore logged data.")
 
     log_files = list_log_files()
@@ -166,8 +283,11 @@ def main() -> None:
             max_value=today,
         )
 
-        if isinstance(date_range, tuple):
+        if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
             start_date, end_date = date_range
+        elif isinstance(date_range, (tuple, list)):
+            # Mid-selection: only the start date has been picked so far
+            start_date = end_date = date_range[0] if date_range else today
         else:
             start_date = date_range
             end_date = date_range

@@ -73,6 +73,8 @@ def send_reauth_notification_email(
     email_config: EmailConfig,
     auth_url: str,
     config_path: Optional[pathlib.Path] = None,
+    pending_file: Optional[pathlib.Path] = None,
+    dashboard_url: Optional[str] = None,
 ) -> bool:
     """
     Send an email notification that OAuth reauthorization is needed.
@@ -94,9 +96,16 @@ def send_reauth_notification_email(
 
     # Build the pending auth code file path info for the email
     pending_file_info = ""
-    if config_path:
+    if dashboard_url:
+        pending_file_info += f"""
+EASIEST - FROM ANY COMPUTER ON YOUR HOME NETWORK:
+Open the dashboard at {dashboard_url} - it shows a sign-in button and a box to
+paste the redirect URL into.
+"""
+    if pending_file is None and config_path:
         pending_file = _get_pending_auth_code_path(config_path)
-        pending_file_info = f"""
+    if pending_file:
+        pending_file_info += f"""
 AUTHORIZING FROM A DIFFERENT MACHINE:
 If you are reading this email on a different computer than {hostname}, you can still
 complete the authorization:
@@ -143,6 +152,15 @@ This is an automated message from the Nest Thermostat Logger.
         logging.error("Failed to send notification email: %s", e)
         return False
 
+def _is_callback_port_listening(port: int = REAUTH_REDIRECT_PORT) -> bool:
+    """Return True if something is accepting connections on the OAuth callback port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def _acquire_reauth_lock() -> bool:
     """Try to acquire the re-authorization lock.
 
@@ -152,12 +170,14 @@ def _acquire_reauth_lock() -> bool:
     import time
 
     if LOCKFILE_PATH.exists():
-        # Check if the lock is stale (older than 7 days + 1 hour buffer)
+        # The process holding the lock always listens on the callback port. If
+        # nothing is listening, the holder died (e.g. killed by a service
+        # restart before atexit could run) and the lock is stale.
         try:
             age_seconds = time.time() - LOCKFILE_PATH.stat().st_mtime
-            if age_seconds < DEFAULT_REAUTH_TIMEOUT_SECONDS + 3600:
+            if age_seconds < DEFAULT_REAUTH_TIMEOUT_SECONDS + 3600 and _is_callback_port_listening():
                 return False
-            # Stale lock, remove it
+            logging.info("Removing stale re-authorization lock: %s", LOCKFILE_PATH)
             LOCKFILE_PATH.unlink(missing_ok=True)
         except OSError:
             return False
@@ -193,19 +213,22 @@ def _extract_code_from_content(content: str) -> Optional[str]:
     Returns:
         The extracted authorization code, or None if not found.
     """
-    content = content.strip()
-    if not content:
+    # Use only the first non-empty line (editors/sync may add trailing junk)
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
         return None
+    content = lines[0].strip("\"'<> ")
 
     # Check if it looks like a URL with a code parameter
     if "code=" in content:
         parsed = urllib.parse.urlparse(content)
-        query_params = urllib.parse.parse_qs(parsed.query)
+        query_params = urllib.parse.parse_qs(parsed.query or content.split("?", 1)[-1])
         if "code" in query_params:
-            return query_params["code"][0]
+            return query_params["code"][0].strip()
 
-    # Otherwise assume the content is the code itself
-    return content
+    # Otherwise assume the content is the code itself. Browsers sometimes show
+    # it URL-encoded (4%2F0A... instead of 4/0A...), so decode it.
+    return urllib.parse.unquote(content)
 
 
 def _check_pending_auth_code_file(config_path: pathlib.Path) -> Optional[str]:
@@ -224,7 +247,11 @@ def _check_pending_auth_code_file(config_path: pathlib.Path) -> Optional[str]:
     Returns:
         The authorization code if found, None otherwise.
     """
-    pending_file = _get_pending_auth_code_path(config_path)
+    return _read_pending_code_file(_get_pending_auth_code_path(config_path))
+
+
+def _read_pending_code_file(pending_file: pathlib.Path) -> Optional[str]:
+    """Read (and blank) an auth code from a specific pending-code file."""
     if not pending_file.exists():
         return None
 
@@ -350,13 +377,27 @@ def wait_for_authorization_code(
         ) from e
 
     # Run server continuously in a background thread (not just one request)
-    # This ensures we capture the callback even if other requests hit the port
+    # This ensures we capture the callback even if other requests hit the port.
+    # handle_request() returns every second so the thread can exit cleanly
+    # before the socket is closed.
+    server.timeout = 1
+    stop_serving = threading.Event()
+
     def serve_until_callback():
-        while not server.callback_received.is_set():
+        while not server.callback_received.is_set() and not stop_serving.is_set():
             server.handle_request()
 
     server_thread = threading.Thread(target=serve_until_callback, daemon=True)
     server_thread.start()
+
+    _original_close = server.server_close
+
+    def _close_after_thread_exits():
+        stop_serving.set()
+        server_thread.join(timeout=5)
+        _original_close()
+
+    server.server_close = _close_after_thread_exits
 
     timeout_days = timeout_seconds / 86400
     if timeout_days >= 1:
@@ -444,8 +485,19 @@ def exchange_code_for_tokens(
         error_data = {}
         if response.headers.get("content-type", "").startswith("application/json"):
             error_data = response.json()
+        error_type = error_data.get("error", "unknown_error")
         error_desc = error_data.get("error_description", response.text)
-        raise RuntimeError(f"Token exchange failed: {response.status_code} {error_desc}")
+        hint = ""
+        if error_type == "invalid_grant":
+            hint = (
+                " (Google rejected the code: it was already used, has expired - codes are only "
+                "valid for a few minutes - or came from a sign-in link with a different "
+                "redirect_uri. Start a fresh sign-in from the most recent email and paste the "
+                "code right away.)"
+            )
+        raise RuntimeError(
+            f"Token exchange failed: {response.status_code} {error_type}: {error_desc}{hint}"
+        )
 
     token_data = response.json()
     access_token = token_data.get("access_token")
@@ -566,12 +618,7 @@ def perform_reauthorization(
     try:
         logging.info("Starting OAuth re-authorization flow...")
 
-        # Build PCM authorization URL
-        auth_url = PCM_AUTH_URL_TEMPLATE.format(
-            project_id=project_id,
-            redirect_uri=urllib.parse.quote(REAUTH_REDIRECT_URI, safe=""),
-            client_id=client_id,
-        )
+        auth_url = build_auth_url(project_id, client_id)
 
         logging.info("Opening browser for authorization...")
         logging.debug("Authorization URL: %s", auth_url)
@@ -603,3 +650,213 @@ def perform_reauthorization(
         return access_token, refresh_token
     finally:
         _release_reauth_lock()
+
+
+def build_auth_url(project_id: str, client_id: str) -> str:
+    """Build the Nest Partner Connections Manager authorization URL."""
+    return PCM_AUTH_URL_TEMPLATE.format(
+        project_id=project_id,
+        redirect_uri=urllib.parse.quote(REAUTH_REDIRECT_URI, safe=""),
+        client_id=client_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking re-authorization (for the always-on NSSM service)
+# ---------------------------------------------------------------------------
+#
+# perform_reauthorization() above blocks for up to 7 days, which is fine for an
+# interactive run but is a bad fit for a Windows service: polling stops
+# entirely, the service can't open a browser (it runs in session 0 with no
+# desktop), and if the service is restarted while waiting it leaves a stale
+# lock behind. NonBlockingReauth instead does a little work each poll cycle and
+# returns immediately, so the poll loop stays responsive and nothing has to be
+# cleaned up if the process is killed.
+
+REAUTH_STATE_FILENAME = "reauth_state.json"
+REAUTH_EMAIL_INTERVAL_SECONDS = 24 * 60 * 60  # re-send the sign-in email once a day
+
+
+class _BackgroundCallbackServer:
+    """Serve the OAuth redirect on localhost:8085 in a daemon thread."""
+
+    def __init__(self, port: int = REAUTH_REDIRECT_PORT) -> None:
+        self._server = OAuthCallbackServer(port)  # raises OSError if port busy
+        self._server.timeout = 1
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._server.handle_request()
+            except Exception as exc:  # keep serving on malformed requests
+                logging.debug("OAuth callback server error: %s", exc)
+
+    def take_code(self) -> Optional[str]:
+        """Return a captured authorization code (once), or None."""
+        if not self._server.callback_received.is_set():
+            return None
+        code, error = self._server.auth_code, self._server.auth_error
+        self._server.auth_code = None
+        self._server.auth_error = None
+        self._server.callback_received.clear()
+        if error:
+            logging.error("OAuth callback returned an error: %s", error)
+        return code
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+        self._server.server_close()
+
+
+class NonBlockingReauth:
+    """Drive OAuth re-authorization one poll at a time without blocking.
+
+    Call step() once per poll cycle. It returns a fresh access token once
+    authorization completes, or None if still waiting. Call close() when done.
+    """
+
+    def __init__(
+        self,
+        config_path: pathlib.Path,
+        project_id: str,
+        client_id: str,
+        client_secret: str,
+        email_config: Optional[EmailConfig] = None,
+        extra_pending_files: "tuple[pathlib.Path, ...] | list[pathlib.Path]" = (),
+        dashboard_url: Optional[str] = None,
+    ) -> None:
+        self.config_path = config_path
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.email_config = email_config
+        self.dashboard_url = dashboard_url
+        self.auth_url = build_auth_url(project_id, client_id)
+        self.pending_files = [_get_pending_auth_code_path(config_path), *extra_pending_files]
+        self.last_error: Optional[str] = None
+        self._server: Optional[_BackgroundCallbackServer] = None
+        self._server_warned = False
+
+    # -- state file (survives restarts so we don't re-send email every boot) --
+    @property
+    def _state_path(self) -> pathlib.Path:
+        return self.config_path.parent / REAUTH_STATE_FILENAME
+
+    def _load_state(self) -> dict:
+        try:
+            return json.loads(self._state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def _save_state(self, state: dict) -> None:
+        try:
+            self._state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logging.warning("Could not write %s: %s", self._state_path, exc)
+
+    def _clear_state(self) -> None:
+        try:
+            self._state_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    # -- main entry point --
+    def step(self) -> Optional[str]:
+        import time
+
+        now = time.time()
+        state = self._load_state()
+        if "waiting_since" not in state:
+            state["waiting_since"] = now
+            self._save_state(state)
+
+        self._ensure_server()
+
+        code = self._server.take_code() if self._server else None
+        for pending_file in self.pending_files:
+            if code:
+                break
+            code = _read_pending_code_file(pending_file)
+
+        if code:
+            try:
+                access_token, refresh_token = exchange_code_for_tokens(
+                    code=code, client_id=self.client_id, client_secret=self.client_secret
+                )
+            except Exception as exc:
+                self.last_error = f"Sign-in code was rejected: {exc}"
+                logging.error("Failed to complete authorization: %s", exc)
+                # Let the user know right away instead of waiting a day.
+                state["last_email_at"] = 0
+                self._save_state(state)
+            else:
+                update_config_refresh_token(self.config_path, refresh_token)
+                self._clear_state()
+                self.last_error = None
+                logging.info("Re-authorization complete!")
+                return access_token
+
+        if now - state.get("last_email_at", 0) >= REAUTH_EMAIL_INTERVAL_SECONDS:
+            if self.email_config and send_reauth_notification_email(
+                self.email_config,
+                self.auth_url,
+                self.config_path,
+                pending_file=self.pending_files[-1],
+                dashboard_url=self.dashboard_url,
+            ):
+                state["last_email_at"] = now
+                self._save_state(state)
+            elif not self.email_config:
+                state["last_email_at"] = now  # log the URL below once a day
+                self._save_state(state)
+            logging.warning("Authorize the Nest Logger by opening:\n%s", self.auth_url)
+
+        hours = (now - state["waiting_since"]) / 3600
+        logging.warning(
+            "Waiting for OAuth re-authorization (%.1f hours so far). No data is being "
+            "logged. Complete sign-in from the dashboard or the emailed link, or paste "
+            "the redirect URL into %s.",
+            hours,
+            " or ".join(str(f) for f in self.pending_files),
+        )
+        return None
+
+    @property
+    def waiting_since(self) -> Optional[float]:
+        return self._load_state().get("waiting_since")
+
+    def code_available(self) -> bool:
+        """Cheap check: has a code arrived via callback or pending file?"""
+        if self._server is not None and self._server._server.callback_received.is_set():
+            return True
+        for pending_file in self.pending_files:
+            try:
+                if pending_file.stat().st_size > 0:
+                    return True
+            except OSError:
+                pass
+        return False
+
+    def _ensure_server(self) -> None:
+        if self._server is not None:
+            return
+        try:
+            self._server = _BackgroundCallbackServer()
+            self._server_warned = False
+        except OSError as exc:
+            if not self._server_warned:
+                logging.warning(
+                    "Could not listen on port %d for the OAuth redirect (%s). "
+                    "Use pending_auth_code.txt instead.",
+                    REAUTH_REDIRECT_PORT,
+                    exc,
+                )
+                self._server_warned = True
+
+    def close(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            self._server = None

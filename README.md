@@ -64,6 +64,19 @@ With these steps complete you have everything required for unattended access to 
 
 ## Setup
 
+> **Where to put the project:** clone it to a local folder such as `C:\NestLogger`,
+> **not** inside Google Drive. Google Drive for Desktop only runs while you're logged
+> in, and it can interfere with files the poller writes (`config.json`) and with git
+> (it drops `desktop.ini` files into `.git`). The poller copies its data into a Google
+> Drive folder for you (see `drive_sync` below).
+>
+> ```bat
+> git clone https://github.com/michaelkorby/nest_thermostat_logger.git C:\NestLogger
+> ```
+>
+> To deploy a new version later: `git -C C:\NestLogger pull`, then
+> `nssm restart NestPoller` and `nssm restart NestDashboard`.
+
 1. Create a machine-specific virtual environment on the C: drive (outside of Google Drive) and install dependencies:
 
 ```bash
@@ -89,7 +102,12 @@ pip install -r requirements.txt
        "latitude": 41.158680,
        "longitude": -73.772659,
        "user_agent": "nest-thermostat-logger (you@example.com)"
-     }
+     },
+     "drive_sync": {
+       "dir": "C:\\Users\\you\\My Drive\\Code\\nest_thermostat_logger",
+       "interval_minutes": 30
+     },
+     "dashboard_url": "http://192.168.1.82:8501/"
    }
    ```
 
@@ -100,6 +118,9 @@ pip install -r requirements.txt
    - `temperature_scale` can be `fahrenheit` (default) or `celsius`; set points are rounded to whole degrees.
    - `timezone` (optional) defaults to `America/New_York` and controls how timestamps are split into `date` and `time` columns.
    - `weather` (optional) enables outside-air readings via [weather.gov](https://weather.gov). Supply latitude/longitude and a user agent string that includes contact info per NWS guidelines. The logger will record the latest observation temperature in Fahrenheit.
+   - `drive_sync` (optional) copies the CSVs and `poller.log` into `<dir>\logs` every `interval_minutes` (and once on shutdown). Point `dir` at a folder inside Google Drive for Desktop; Drive uploads the copies whenever it's running, and if you're logged out they upload at your next login. `<dir>\pending_auth_code.txt` is also watched for sign-in codes.
+   - `email` (optional) sends a notification when Nest sign-in is needed: `{"recipient": "...", "sender_email": "...", "sender_password": "<Gmail app password>"}`.
+   - `dashboard_url` (optional) is included in that email so you can fix sign-in from the dashboard.
 
 3. Run the poller:
 
@@ -136,11 +157,11 @@ The poller runs as a Windows service managed by **NSSM** so it polls every five 
 
 `start_poller.bat` calls `poller_scheduler.py --duration 0` (run forever), which loops every 5 minutes polling the Nest API. The scheduler handles `SIGTERM` gracefully — NSSM sends this signal when the service is stopped, so the current poll finishes cleanly before the process exits.
 
-### Service account (important for Google Drive)
+### Service account
 
-If the project files live in your Google Drive folder (e.g. `C:\Users\mkorb\My Drive\...`), the service must run as **your Windows user account**, not Local System. Local System cannot access user-profile paths. `install_poller_service.bat` prompts for your username and password and grants the account the *Log on as a service* right automatically.
+Run the service as **your Windows user account** so it can write the `drive_sync` copies into your Google Drive folder (under your user profile). `install_poller_service.bat` prompts for your username and password and grants the account the *Log on as a service* right automatically.
 
-> **Google Drive sync note:** Google Drive for Desktop must be configured in **Mirror** mode (files stored locally) for the poller to read/write CSV files while no user is interactively logged in. In Stream mode, files are fetched on demand and may not be available without an active user session.
+> **Google Drive note:** Google Drive for Desktop must be in **Mirror** mode (files stored locally) so the `drive_sync` folder exists on disk while no one is logged in. Drive itself only uploads while you're logged in.
 
 ### Installing the poller service
 
@@ -232,21 +253,35 @@ Open a browser to `http://localhost:8501` to verify the dashboard loads.
 - **Port conflict:** Streamlit defaults to port `8501`. If another process owns it, add `--server.port=8502` (or any free port) to the `streamlit run` line in `start_dashboard.bat` and update any bookmarks accordingly.
 - **Logs keep growing:** `AppRotateBytes 1048576` caps each log at ~1 MB before rotating. Increase or remove that setting if you need more history.
 
-## Automatic Re-authorization
+## Poller health and re-authorization
 
-When the refresh token expires (typically after ~7 days for unverified OAuth apps), the poller automatically handles re-authorization:
+After every poll the scheduler writes `poller_status.json`, and the dashboard shows a banner at the top:
 
-1. A browser tab opens to the Google/Nest authorization page
-2. The poller waits up to **7 days** for you to complete authorization (you don't need to be logged in immediately)
-3. When you log in and click "Allow", the poller captures the code and exchanges it for new tokens
-4. The new refresh token is saved to `config.json` automatically
-5. Polling resumes on the next scheduled run
+- ✅ **Poller healthy**: time of the last reading and of the last Google Drive copy.
+- 🔴 **Nest sign-in expired**: a **Sign in to Nest** button plus a box to paste the redirect URL.
+- 🔴 **Poller hasn't checked in** for 3 poll intervals: the service is probably stopped.
+- 🟡 **Last poll failed** (with the error), or **Google Drive copy is failing**.
 
-During this waiting period, subsequent poller runs will detect that re-authorization is already in progress and skip gracefully (no duplicate browser tabs).
+### When the refresh token expires
 
-**Requirements**: Ensure `http://localhost:8085` is listed in your OAuth client's Authorized Redirect URIs in Google Cloud Console (see step 2 in Prerequisites).
+Re-authorization never blocks polling. The poller keeps running and every cycle:
 
-To force re-authorization manually (e.g., to test the flow):
+1. Listens on `http://localhost:8085` for the OAuth redirect and checks
+   `pending_auth_code.txt` in the project folder and in the `drive_sync` folder.
+2. Emails the sign-in link (if `email` is configured), at most once a day, or right
+   away if a pasted code was rejected.
+3. As soon as a code arrives (it checks every 10 seconds), exchanges it, saves the new
+   refresh token to `config.json` and resumes logging.
+
+To complete sign-in **from another computer**: open the dashboard, click **Sign in to Nest**,
+approve access, then copy the `http://localhost:8085/?code=...` address from the browser
+(the page won't load, that's expected) and paste it into the dashboard. Do it right away:
+codes expire within minutes. On the logger computer itself the redirect is captured
+automatically.
+
+**Requirements**: `http://localhost:8085` must be listed in your OAuth client's Authorized Redirect URIs (see step 2 in Prerequisites).
+
+To force re-authorization manually from an interactive session:
 
 ```bash
 python -m src.nest_poller --config config.json --reauth
@@ -254,13 +289,9 @@ python -m src.nest_poller --config config.json --reauth
 
 ## Troubleshooting
 
-- **Refresh token expires after ~7 days**: This is common with unverified OAuth apps in Testing mode. The poller now handles this automatically by opening a browser for re-authorization. If you want to prevent this:
-  - **Option 1 (Recommended)**: Get your OAuth app verified in Google Cloud Console. This requires submitting your app for review, but refresh tokens will last much longer (up to 6 months of inactivity).
-  - **Option 2**: Keep the app in Testing mode but ensure it runs frequently (your 5-minute schedule should help).
-  - When Google provides a new refresh token during normal token refresh, the poller automatically saves it to `config.json`.
-
-- **Browser doesn't open for re-authorization**: If running headless (no user session), the browser cannot open. Run the poller manually with `--reauth` in an interactive session to complete re-authorization.
-  
+- **Refresh token expires every 7 days**: your OAuth app is in **Testing** mode. In Google Cloud Console go to **Google Auth Platform > Audience** and click **Publish app**. It needs an app name, support email, homepage and privacy policy on the **Branding** page; this repo's GitHub Pages site in `docs/` provides the last two. You don't need to submit it for verification for personal use: you'll see an "unverified app" warning on sign-in, and refresh tokens stop expiring weekly. **Sign in once more after publishing**, because tokens issued while in Testing still expire.
+- **"Token exchange failed: 400 invalid_grant"** after pasting a code: the code was already used, had expired, or came from an old sign-in link. Start a fresh sign-in and paste immediately.
+- When Google provides a new refresh token during normal token refresh, the poller automatically saves it to `config.json`.
 - If the script logs `Failed to refresh access token`, verify the client credentials and refresh token.
 - `No thermostat devices found` indicates the SDM API returned no thermostat devices. Check the project linkage and API permissions.
 - Use `--log-level DEBUG` for detailed logging:

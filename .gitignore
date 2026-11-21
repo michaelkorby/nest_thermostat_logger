@@ -13,3 +13,6 @@ private_notes.md
 streamlit.log
 pending_auth_code.txt
 .claude/settings.local.json
+reauth_state.json
+poller_status.json
+poller_status.tmp
